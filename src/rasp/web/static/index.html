@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Импорт данных — расписание колледжа</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="/" aria-label="Расписание колледжа, главная">
+          <span class="brand-mark" aria-hidden="true">Р</span>
+          <span>
+            <strong>Диспетчерская</strong>
+            <small>расписание колледжа</small>
+          </span>
+        </a>
+        <div class="system-state" id="system-state" role="status">
+          <span class="state-dot" aria-hidden="true"></span>
+          <span>Проверяем хранилище…</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <nav class="steps" aria-label="Этапы импорта">
+        <ol>
+          <li class="is-current" id="step-file">
+            <span>1</span>
+            <div><strong>Файл</strong><small>Выберите Excel</small></div>
+          </li>
+          <li id="step-check">
+            <span>2</span>
+            <div><strong>Проверка</strong><small>Сверьте данные</small></div>
+          </li>
+          <li id="step-activate">
+            <span>3</span>
+            <div><strong>Активация</strong><small>Создайте версию</small></div>
+          </li>
+        </ol>
+      </nav>
+
+      <div class="workspace-grid">
+        <section class="workspace" aria-labelledby="page-title">
+          <div class="section-heading">
+            <p class="eyebrow">Исходные данные</p>
+            <h1 id="page-title">Импорт исходных данных</h1>
+            <p>
+              Загрузите один файл с листами «Преподаватели», «Группы» и
+              «Нагрузка». Проверка не изменяет действующее расписание.
+            </p>
+          </div>
+
+          <form id="import-form" novalidate>
+            <div class="upload-zone" id="upload-zone">
+              <input
+                id="file-input"
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                required
+              />
+              <label for="file-input">
+                <span class="upload-symbol" aria-hidden="true">XLSX</span>
+                <strong>Выберите файл Excel</strong>
+                <span>или перетащите его в эту область</span>
+                <small>Только .xlsx, не более 10 МиБ</small>
+              </label>
+              <div class="selected-file" id="selected-file" hidden>
+                <span>
+                  <strong id="selected-file-name"></strong>
+                  <small id="selected-file-size"></small>
+                </span>
+                <button type="button" class="button-link" id="clear-file">
+                  Убрать
+                </button>
+              </div>
+            </div>
+
+            <div class="privacy-note">
+              <strong>Локальная обработка</strong>
+              <p>
+                Файл проверяется на этом компьютере. Значения ячеек не
+                записываются в журнал ошибок.
+              </p>
+            </div>
+
+            <div class="form-actions">
+              <button class="button button-primary" id="preview-button" type="submit">
+                Проверить файл
+              </button>
+              <button
+                class="button button-secondary"
+                id="activate-button"
+                type="button"
+                disabled
+              >
+                Активировать версию
+              </button>
+            </div>
+          </form>
+
+          <div class="message" id="message" role="alert" hidden></div>
+          <div class="sr-only" id="live-region" aria-live="polite"></div>
+
+          <section class="preview" id="preview" aria-labelledby="preview-title" hidden>
+            <div class="preview-header">
+              <div>
+                <p class="eyebrow">Результат проверки</p>
+                <h2 id="preview-title">Данные готовы к импорту</h2>
+              </div>
+              <span class="verified-badge">Проверено</span>
+            </div>
+
+            <dl class="metric-row">
+              <div><dt>Преподаватели</dt><dd id="teacher-count">0</dd></div>
+              <div><dt>Группы</dt><dd id="group-count">0</dd></div>
+              <div><dt>Строки нагрузки</dt><dd id="workload-count">0</dd></div>
+            </dl>
+
+            <div class="preview-block">
+              <h3>Фрагмент данных</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Код</th>
+                      <th scope="col">Преподаватель</th>
+                      <th scope="col">Подразделение</th>
+                    </tr>
+                  </thead>
+                  <tbody id="teacher-preview"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="sidebar" aria-labelledby="history-title">
+          <div class="sidebar-heading">
+            <div>
+              <p class="eyebrow">Хранилище</p>
+              <h2 id="history-title">Версии данных</h2>
+            </div>
+            <button class="icon-button" id="refresh-status" type="button" aria-label="Обновить список версий">
+              ↻
+            </button>
+          </div>
+          <div class="active-summary" id="active-summary">
+            <span>Активная версия</span>
+            <strong>Нет данных</strong>
+            <small>Импортируйте первый проверенный файл</small>
+          </div>
+          <ol class="version-list" id="version-list"></ol>
+          <div class="empty-history" id="empty-history">
+            <span aria-hidden="true">01</span>
+            <p>История появится после первой активации.</p>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <footer>
+      <p>Локальная система · данные не отправляются во внешние сервисы</p>
+    </footer>
+  </body>
+</html>
