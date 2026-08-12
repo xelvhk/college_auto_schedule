@@ -64,6 +64,27 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertFalse(receipt.reused)
         self.assertEqual(restored, make_batch())
 
+    def test_preserves_group_curriculum_code(self) -> None:
+        batch = make_batch().model_copy(
+            update={
+                "groups": (
+                    make_batch().groups[0].model_copy(
+                        update={"curriculum_code": "UP-09.02.07-2026"}
+                    ),
+                )
+            }
+        )
+
+        self.repository.activate_import(
+            batch,
+            source_name="curriculum.xlsx",
+            source_sha256="9" * 64,
+        )
+
+        restored = self.repository.get_active_batch()
+
+        self.assertEqual(restored.groups[0].curriculum_code, "UP-09.02.07-2026")
+
     def test_same_fingerprint_is_idempotent(self) -> None:
         first = self.repository.activate_import(
             make_batch(), source_name="first.xlsx", source_sha256="b" * 64
@@ -179,6 +200,44 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         with closing(sqlite3.connect(future_database)) as connection, connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
         self.assertEqual(schema_version, 99)
+
+    def test_migrates_version_one_database_without_losing_groups(self) -> None:
+        legacy_database = Path(self.temporary_directory.name) / "legacy.sqlite3"
+        with closing(sqlite3.connect(legacy_database)) as connection, connection:
+            connection.executescript(
+                """
+                PRAGMA user_version = 1;
+                CREATE TABLE student_groups (
+                    import_version_id INTEGER NOT NULL,
+                    group_code TEXT NOT NULL,
+                    specialty_code TEXT,
+                    course INTEGER NOT NULL,
+                    education_form TEXT NOT NULL,
+                    headcount INTEGER NOT NULL,
+                    program_base TEXT,
+                    study_week_type TEXT,
+                    primary_building_code TEXT,
+                    subgroup_count INTEGER NOT NULL,
+                    PRIMARY KEY (import_version_id, group_code)
+                );
+                INSERT INTO student_groups VALUES (
+                    1, 'ИС-101', '09.02.07', 1, 'full_time', 25,
+                    '9', NULL, NULL, 1
+                );
+                """
+            )
+
+        repository = SqliteImportRepository(legacy_database)
+        repository.initialize()
+
+        with closing(sqlite3.connect(legacy_database)) as connection:
+            row = connection.execute(
+                "SELECT group_code, curriculum_code FROM student_groups"
+            ).fetchone()
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertEqual(row, ("ИС-101", None))
+        self.assertEqual(version, 2)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

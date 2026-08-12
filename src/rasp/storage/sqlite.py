@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from rasp.domain.models import Group, ImportBatch, Teacher, WorkloadItem
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS student_groups (
     import_version_id INTEGER NOT NULL,
     group_code TEXT NOT NULL,
     specialty_code TEXT,
+    curriculum_code TEXT,
     course INTEGER NOT NULL,
     education_form TEXT NOT NULL,
     headcount INTEGER NOT NULL,
@@ -149,8 +150,12 @@ class SqliteImportRepository:
                         "Database schema is newer than this application version"
                     )
                 connection.executescript(SCHEMA)
+                if current_version == 1:
+                    connection.execute(
+                        "ALTER TABLE student_groups ADD COLUMN curriculum_code TEXT"
+                    )
                 if current_version < SCHEMA_VERSION:
-                    connection.execute("PRAGMA user_version = 1")
+                    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         except sqlite3.Error as error:
             raise StorageError("Unable to initialize timetable storage") from error
 
@@ -270,13 +275,26 @@ class SqliteImportRepository:
         )
         connection.executemany(
             """
-            INSERT INTO student_groups VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO student_groups (
+                import_version_id,
+                group_code,
+                specialty_code,
+                curriculum_code,
+                course,
+                education_form,
+                headcount,
+                program_base,
+                study_week_type,
+                primary_building_code,
+                subgroup_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     version_id,
                     item.group_code,
                     item.specialty_code,
+                    item.curriculum_code,
                     item.course,
                     item.education_form.value,
                     item.headcount,
@@ -436,6 +454,7 @@ class SqliteImportRepository:
         return Group(
             group_code=row["group_code"],
             specialty_code=row["specialty_code"],
+            curriculum_code=row["curriculum_code"],
             course=row["course"],
             education_form=row["education_form"],
             headcount=row["headcount"],

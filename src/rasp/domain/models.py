@@ -98,6 +98,7 @@ class Teacher(DomainModel):
 class Group(DomainModel):
     group_code: Code
     specialty_code: Code | None = None
+    curriculum_code: Code | None = None
     course: int = Field(ge=1, le=6)
     education_form: EducationForm = EducationForm.FULL_TIME
     headcount: PositiveInt
@@ -106,7 +107,9 @@ class Group(DomainModel):
     primary_building_code: Code | None = None
     subgroup_count: int = Field(default=1, ge=1, le=20)
 
-    @field_validator("group_code", "specialty_code", "primary_building_code")
+    @field_validator(
+        "group_code", "specialty_code", "curriculum_code", "primary_building_code"
+    )
     @classmethod
     def normalize_codes(cls, value: str | None) -> str | None:
         return value.upper() if value is not None else None
