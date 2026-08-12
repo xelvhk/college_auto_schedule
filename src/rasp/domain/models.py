@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
 from typing import Annotated
 
@@ -56,6 +57,17 @@ class LessonType(StrEnum):
     CREDIT = "credit"
 
 
+class ProgramBase(StrEnum):
+    NINE_CLASSES = "9"
+    ELEVEN_CLASSES = "11"
+
+
+class CurriculumStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
 class Teacher(DomainModel):
     teacher_code: Code
     full_name: ShortText
@@ -98,6 +110,66 @@ class Group(DomainModel):
     @classmethod
     def normalize_codes(cls, value: str | None) -> str | None:
         return value.upper() if value is not None else None
+
+
+class Specialty(DomainModel):
+    specialty_code: Code
+    specialty_name: ShortText
+    qualification: str | None = Field(default=None, max_length=255)
+    program_base: ProgramBase
+    education_form: EducationForm
+    active: bool = True
+
+    @field_validator("specialty_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return value.upper()
+
+
+class Curriculum(DomainModel):
+    curriculum_code: Code
+    specialty_code: Code
+    admission_year: int = Field(ge=2000, le=2100)
+    version: ShortText
+    valid_from: date
+    valid_to: date | None = None
+    status: CurriculumStatus
+
+    @field_validator("curriculum_code", "specialty_code")
+    @classmethod
+    def normalize_codes(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def validity_period_is_ordered(self) -> Curriculum:
+        if self.valid_to is not None and self.valid_to < self.valid_from:
+            raise ValueError("valid_to must not be earlier than valid_from")
+        return self
+
+
+class CurriculumDiscipline(DomainModel):
+    curriculum_code: Code
+    discipline_code: Code
+    discipline_name: ShortText
+    section_code: Code | None = None
+    semester: int = Field(ge=1, le=12)
+    lesson_type: LessonType
+    planned_hours: int = Field(ge=0)
+    control_form: str | None = Field(default=None, max_length=128)
+
+    @field_validator("curriculum_code", "discipline_code", "section_code")
+    @classmethod
+    def normalize_codes(cls, value: str | None) -> str | None:
+        return value.upper() if value is not None else None
+
+    @property
+    def stable_key(self) -> tuple[str, str, int, LessonType]:
+        return (
+            self.curriculum_code,
+            self.discipline_code,
+            self.semester,
+            self.lesson_type,
+        )
 
 
 class WorkloadItem(DomainModel):
@@ -145,3 +217,8 @@ class ImportBatch(DomainModel):
     groups: tuple[Group, ...]
     workloads: tuple[WorkloadItem, ...]
 
+
+class ReferenceDataBatch(DomainModel):
+    specialties: tuple[Specialty, ...]
+    curricula: tuple[Curriculum, ...]
+    disciplines: tuple[CurriculumDiscipline, ...]
