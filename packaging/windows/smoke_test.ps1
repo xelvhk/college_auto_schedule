@@ -27,7 +27,12 @@ try {
     }
 
     if ($null -eq $status) {
-        throw "Packaged application did not answer /api/status."
+        $errorLog = Join-Path $testLocalAppData "CollegeAutoSchedule\startup-error.log"
+        if (Test-Path -LiteralPath $errorLog) {
+            Write-Host "Desktop startup error:"
+            Get-Content -LiteralPath $errorLog
+        }
+        throw "Packaged application did not answer /api/status (exit code: $($process.ExitCode))."
     }
     if ($process.HasExited) {
         throw "Packaged application exited unexpectedly."

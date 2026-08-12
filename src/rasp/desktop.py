@@ -5,6 +5,7 @@ import os
 import socket
 import sys
 import threading
+import traceback
 import webbrowser
 from pathlib import Path
 
@@ -132,7 +133,7 @@ def _open_browser_when_ready(server: uvicorn.Server, url: str) -> None:
         webbrowser.open(url)
 
 
-def main() -> int:
+def _run() -> int:
     data_directory = resolve_data_directory()
     data_directory.mkdir(parents=True, exist_ok=True)
     listener, port = reserve_loopback_socket()
@@ -162,6 +163,22 @@ def main() -> int:
         listener.close()
         lock.release()
     return 0
+
+
+def main() -> int:
+    try:
+        return _run()
+    except BaseException:
+        try:
+            data_directory = resolve_data_directory()
+            data_directory.mkdir(parents=True, exist_ok=True)
+            (data_directory / "startup-error.log").write_text(
+                traceback.format_exc(),
+                encoding="utf-8",
+            )
+        except BaseException:
+            pass
+        return 1
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from rasp.desktop import (
     InstanceLock,
+    main,
     reserve_loopback_socket,
     resolve_data_directory,
 )
@@ -59,6 +60,19 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertTrue(running)
         windll.kernel32.OpenProcess.assert_called_once_with(0x1000, False, 42)
         windll.kernel32.CloseHandle.assert_called_once_with(123)
+
+    def test_main_writes_safe_startup_error_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_directory = Path(directory)
+            with (
+                patch("rasp.desktop.resolve_data_directory", return_value=data_directory),
+                patch("rasp.desktop._run", side_effect=RuntimeError("startup failed")),
+            ):
+                exit_code = main()
+
+            log = (data_directory / "startup-error.log").read_text(encoding="utf-8")
+            self.assertEqual(exit_code, 1)
+            self.assertIn("RuntimeError: startup failed", log)
 
     def test_reserved_socket_is_bound_to_loopback(self) -> None:
         try:
