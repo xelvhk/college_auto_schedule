@@ -68,6 +68,13 @@ class CurriculumStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class StudentStatus(StrEnum):
+    ACTIVE = "active"
+    ACADEMIC_LEAVE = "academic_leave"
+    GRADUATED = "graduated"
+    DISMISSED = "dismissed"
+
+
 class Teacher(DomainModel):
     teacher_code: Code
     full_name: ShortText
@@ -175,6 +182,54 @@ class CurriculumDiscipline(DomainModel):
         )
 
 
+class Student(DomainModel):
+    student_code: Code
+    full_name: ShortText
+    group_code: Code
+    status: StudentStatus
+    enrollment_date: date | None = None
+    end_date: date | None = None
+    subgroup_codes: tuple[int, ...] = ()
+    elective_codes: tuple[Code, ...] = ()
+
+    @field_validator("student_code", "group_code")
+    @classmethod
+    def normalize_codes(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("subgroup_codes", mode="before")
+    @classmethod
+    def parse_subgroups(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = tuple(part.strip() for part in value.split(";") if part.strip())
+        if isinstance(value, (tuple, list)):
+            return tuple(sorted({int(part) for part in value}))
+        return value
+
+    @field_validator("elective_codes", mode="before")
+    @classmethod
+    def parse_electives(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = tuple(part.strip() for part in value.split(";") if part.strip())
+        if isinstance(value, (tuple, list)):
+            return tuple(sorted({str(part).strip().upper() for part in value}))
+        return value
+
+    @model_validator(mode="after")
+    def enrollment_period_is_ordered(self) -> Student:
+        if (
+            self.enrollment_date is not None
+            and self.end_date is not None
+            and self.end_date < self.enrollment_date
+        ):
+            raise ValueError("end_date must not be earlier than enrollment_date")
+        return self
+
+
 class WorkloadItem(DomainModel):
     workload_row_code: Code
     academic_year: Annotated[
@@ -222,6 +277,7 @@ class ImportBatch(DomainModel):
     specialties: tuple[Specialty, ...] = ()
     curricula: tuple[Curriculum, ...] = ()
     disciplines: tuple[CurriculumDiscipline, ...] = ()
+    students: tuple[Student, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):

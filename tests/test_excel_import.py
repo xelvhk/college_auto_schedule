@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
-from rasp.domain.models import Group, Teacher, WorkloadItem
+from rasp.domain.models import Group, Student, Teacher, WorkloadItem
 from rasp.imports.excel import (
     ImportValidationError,
     build_import_batch,
@@ -35,6 +35,25 @@ class DomainModelTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             Group(group_code="ИС-102", course=1, headcount=0)
+
+    def test_student_normalizes_memberships_and_orders_dates(self) -> None:
+        student = Student(
+            student_code=" s-001 ",
+            full_name="Петров Пётр Петрович",
+            group_code=" ис-101 ",
+            status="active",
+            enrollment_date="2026-09-01",
+            subgroup_codes=(" 2 ", "1"),
+            elective_codes=(" web ",),
+        )
+
+        self.assertEqual(student.student_code, "S-001")
+        self.assertEqual(student.group_code, "ИС-101")
+        self.assertEqual(student.subgroup_codes, (1, 2))
+        self.assertEqual(student.elective_codes, ("WEB",))
+
+        with self.assertRaises(ValidationError):
+            Student(**(student.model_dump() | {"end_date": "2026-08-31"}))
 
 
 class ImportBatchTests(unittest.TestCase):
@@ -116,8 +135,55 @@ class ImportBatchTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             WorkloadItem(**{**self.workload_rows[0], "total_academic_hours": 71})
 
+    def test_rejects_student_for_unknown_group_or_subgroup(self) -> None:
+        student_rows = [
+            {
+                "student_code": "S-001",
+                "full_name": "Петров Пётр Петрович",
+                "group_code": "ИС-404",
+                "status": "active",
+                "subgroup_codes": "2",
+            }
+        ]
+
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(
+                teacher_rows=self.teacher_rows,
+                group_rows=self.group_rows,
+                workload_rows=self.workload_rows,
+                student_rows=student_rows,
+            )
+
+        self.assertIn("unknown_student_group", {i.code for i in raised.exception.issues})
+
+        student_rows[0]["group_code"] = "ИС-101"
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(
+                teacher_rows=self.teacher_rows,
+                group_rows=self.group_rows,
+                workload_rows=self.workload_rows,
+                student_rows=student_rows,
+            )
+
+        self.assertIn("unknown_subgroup", {i.code for i in raised.exception.issues})
+
 
 class WorkbookImportTests(unittest.TestCase):
+    def test_rejects_forbidden_personal_columns(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx")
+        students = workbook["Студенты"]
+        students["I1"] = "Паспортные данные"
+        students["I2"] = "x"
+
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "sensitive.xlsx"
+            workbook.save(target)
+            workbook.close()
+            with self.assertRaises(ImportValidationError) as raised:
+                read_import_workbook(target)
+
+        self.assertIn("forbidden_personal_data", {i.code for i in raised.exception.issues})
+
     def test_rejects_partial_reference_sheet_set(self) -> None:
         workbook = load_workbook(FIXTURES / "valid-import.xlsx")
         del workbook["Дисциплины"]
@@ -230,6 +296,7 @@ class WorkbookImportTests(unittest.TestCase):
         self.assertEqual(batch.groups[0].group_code, "ИС-101")
         self.assertEqual(batch.workloads[0].workload_row_code, "W-001")
         self.assertEqual(batch.specialties[0].specialty_code, "09.02.07")
+        self.assertEqual(batch.students[0].student_code, "S-001")
 
     def test_rejects_non_xlsx_file_before_parsing(self) -> None:
         with self.assertRaises(ImportValidationError) as raised:

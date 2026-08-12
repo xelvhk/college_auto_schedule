@@ -12,6 +12,7 @@ from rasp.domain.models import (
     Group,
     ImportBatch,
     Specialty,
+    Student,
     Teacher,
     WorkloadItem,
 )
@@ -89,6 +90,17 @@ def make_full_batch() -> ImportBatch:
                     planned_hours=72,
                 ),
             ),
+            "students": (
+                Student(
+                    student_code="S-001",
+                    full_name="Петров Пётр Петрович",
+                    group_code="ИС-101",
+                    status="active",
+                    enrollment_date="2026-09-01",
+                    subgroup_codes=(1,),
+                    elective_codes=("WEB",),
+                ),
+            ),
         }
     )
 
@@ -128,6 +140,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(receipt.specialty_count, 1)
         self.assertEqual(receipt.curriculum_count, 1)
         self.assertEqual(receipt.discipline_count, 1)
+        self.assertEqual(receipt.student_count, 1)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
@@ -303,7 +316,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

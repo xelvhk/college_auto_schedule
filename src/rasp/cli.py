@@ -81,6 +81,7 @@ def _validate(file_path: Path) -> int:
                 "specialties": len(batch.specialties),
                 "curricula": len(batch.curricula),
                 "disciplines": len(batch.disciplines),
+                "students": len(batch.students),
             },
         }
     )
@@ -116,6 +117,7 @@ def _activate(file_path: Path, database_path: Path) -> int:
                 "specialties": receipt.specialty_count,
                 "curricula": receipt.curriculum_count,
                 "disciplines": receipt.discipline_count,
+                "students": receipt.student_count,
             },
         }
     )
@@ -148,6 +150,7 @@ def _status(database_path: Path) -> int:
                 "specialties": len(batch.specialties) if batch else 0,
                 "curricula": len(batch.curricula) if batch else 0,
                 "disciplines": len(batch.disciplines) if batch else 0,
+                "students": len(batch.students) if batch else 0,
             },
             "versions": [
                 {

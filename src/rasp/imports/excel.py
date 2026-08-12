@@ -14,6 +14,7 @@ from rasp.domain.models import (
     Group,
     ImportBatch,
     ReferenceDataBatch,
+    Student,
     Teacher,
     WorkloadItem,
 )
@@ -56,7 +57,32 @@ REFERENCE_SHEETS = {
     "Учебные планы": "curricula",
     "Дисциплины": "disciplines",
 }
+STUDENT_SHEET = {"Студенты": "students"}
 SHEETS = CORE_SHEETS | REFERENCE_SHEETS
+FORBIDDEN_STUDENT_HEADERS = {
+    "address",
+    "attendance",
+    "birth_date",
+    "date_of_birth",
+    "grades",
+    "health_data",
+    "medical_data",
+    "passport",
+    "passport_data",
+    "payment_data",
+    "phone",
+    "адрес",
+    "данные об оплате",
+    "дата рождения",
+    "медицинские данные",
+    "номер телефона",
+    "оценки",
+    "паспорт",
+    "паспортные данные",
+    "посещаемость",
+    "сведения о здоровье",
+    "телефон",
+}
 REQUIRED_HEADERS = {
     "Преподаватели": {"teacher_code", "full_name", "yearly_assigned_hours"},
     "Группы": {"group_code", "course", "headcount"},
@@ -94,6 +120,7 @@ REQUIRED_HEADERS = {
         "lesson_type",
         "planned_hours",
     },
+    "Студенты": {"student_code", "full_name", "group_code", "status"},
 }
 
 
@@ -155,6 +182,7 @@ def build_import_batch(
     specialty_rows: Iterable[Mapping[str, Any]] | None = None,
     curriculum_rows: Iterable[Mapping[str, Any]] | None = None,
     discipline_rows: Iterable[Mapping[str, Any]] | None = None,
+    student_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -165,12 +193,17 @@ def build_import_batch(
     )
     issues.extend(group_issues)
     issues.extend(workload_issues)
+    students: list[Student] = []
+    if student_rows is not None:
+        students, student_issues = _parse_rows("students", student_rows, Student)
+        issues.extend(student_issues)
 
     issues.extend(_duplicate_issues("teachers", teachers, "teacher_code"))
     issues.extend(_duplicate_issues("groups", groups, "group_code"))
     issues.extend(
         _duplicate_issues("workloads", workloads, "workload_row_code")
     )
+    issues.extend(_duplicate_issues("students", students, "student_code"))
 
     teacher_codes = {teacher.teacher_code for teacher in teachers}
     group_codes = {group.group_code for group in groups}
@@ -196,6 +229,31 @@ def build_import_batch(
                 )
             )
 
+    groups_by_code = {group.group_code: group for group in groups}
+    for row_number, student in enumerate(students, start=2):
+        group = groups_by_code.get(student.group_code)
+        if group is None:
+            issues.append(
+                ImportIssue(
+                    "students",
+                    row_number,
+                    "group_code",
+                    "unknown_student_group",
+                    f"Unknown student group code: {student.group_code}",
+                )
+            )
+            continue
+        for subgroup_code in student.subgroup_codes:
+            if subgroup_code < 1 or subgroup_code > group.subgroup_count:
+                issues.append(
+                    ImportIssue(
+                        "students",
+                        row_number,
+                        "subgroup_codes",
+                        "unknown_subgroup",
+                        "Student subgroup is outside the group's configured range",
+                    )
+                )
     references = ReferenceDataBatch(specialties=(), curricula=(), disciplines=())
     reference_inputs = (specialty_rows, curriculum_rows, discipline_rows)
     if any(rows is not None for rows in reference_inputs):
@@ -232,6 +290,7 @@ def build_import_batch(
         teachers=tuple(teachers),
         groups=tuple(groups),
         workloads=tuple(workloads),
+        students=tuple(students),
     )
     if issues:
         raise ImportValidationError(issues)
@@ -408,6 +467,18 @@ def _read_sheet_rows(worksheet: Any) -> list[dict[str, Any]]:
                 f"Missing headers: {', '.join(sorted(missing))}",
             )
         )
+    if worksheet.title == "Студенты":
+        forbidden = FORBIDDEN_STUDENT_HEADERS & {header.lower() for header in headers}
+        if forbidden:
+            issues.append(
+                ImportIssue(
+                    worksheet.title,
+                    1,
+                    None,
+                    "forbidden_personal_data",
+                    f"Forbidden personal-data headers: {', '.join(sorted(forbidden))}",
+                )
+            )
 
     rows: list[dict[str, Any]] = []
     for row_number, cells in enumerate(row_iterator, start=2):
@@ -487,6 +558,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         selected_sheets = dict(CORE_SHEETS)
         if reference_sheets_present:
             selected_sheets.update(REFERENCE_SHEETS)
+        if "Студенты" in available_sheets:
+            selected_sheets.update(STUDENT_SHEET)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -502,6 +575,7 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             specialty_rows=rows.get("specialties"),
             curriculum_rows=rows.get("curricula"),
             discipline_rows=rows.get("disciplines"),
+            student_rows=rows.get("students"),
         )
     finally:
         workbook.close()

@@ -51,6 +51,7 @@ def _counts(batch: ImportBatch | None) -> dict[str, int]:
         "specialties": len(batch.specialties) if batch else 0,
         "curricula": len(batch.curricula) if batch else 0,
         "disciplines": len(batch.disciplines) if batch else 0,
+        "students": len(batch.students) if batch else 0,
     }
 
 
@@ -70,6 +71,24 @@ def _readiness_warnings(batch: ImportBatch) -> list[dict[str, object]]:
         for issue in report.issues
         if issue.severity is ReadinessSeverity.WARNING
     ]
+
+
+def _student_changes(
+    batch: ImportBatch,
+    active_batch: ImportBatch | None,
+) -> dict[str, int]:
+    incoming = {student.student_code: student for student in batch.students}
+    active = {
+        student.student_code: student
+        for student in (active_batch.students if active_batch else ())
+    }
+    return {
+        "created": len(incoming.keys() - active.keys()),
+        "updated": sum(
+            incoming[code] != active[code] for code in incoming.keys() & active.keys()
+        ),
+        "deactivated": len(active.keys() - incoming.keys()),
+    }
 
 
 def _issues_payload(error: ImportValidationError) -> dict[str, object]:
@@ -203,11 +222,20 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 validate_curriculum_readiness(batch)
             except ImportValidationError as error:
                 return JSONResponse(status_code=422, content=_issues_payload(error))
+        try:
+            if repository.database_path.exists():
+                repository.initialize()
+                active_batch = repository.get_active_batch()
+            else:
+                active_batch = None
+        except StorageError as error:
+            raise ApiError(500, "storage_error", str(error)) from error
         return JSONResponse(
             {
                 "valid": True,
                 "fileName": Path(file.filename or "import.xlsx").name,
                 "counts": _counts(batch),
+                "studentChanges": _student_changes(batch, active_batch),
                 "warnings": _readiness_warnings(batch),
                 "samples": {
                     "teachers": [
@@ -258,6 +286,15 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                         }
                         for item in batch.disciplines[:5]
                     ],
+                    "students": [
+                        {
+                            "studentCode": item.student_code,
+                            "fullName": item.full_name,
+                            "groupCode": item.group_code,
+                            "status": item.status.value,
+                        }
+                        for item in batch.students[:5]
+                    ],
                 },
             }
         )
@@ -285,6 +322,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "specialties": receipt.specialty_count,
                     "curricula": receipt.curriculum_count,
                     "disciplines": receipt.discipline_count,
+                    "students": receipt.student_count,
                 },
             },
         )

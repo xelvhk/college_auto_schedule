@@ -51,7 +51,8 @@
             <h1 id="page-title">Импорт исходных данных</h1>
             <p>
               Загрузите один файл с листами «Преподаватели», «Группы»,
-              «Нагрузка», «Специальности», «Учебные планы» и «Дисциплины».
+              «Нагрузка», «Специальности», «Учебные планы», «Дисциплины» и
+              «Студенты».
               Проверка не изменяет активную версию данных.
             </p>
           </div>
@@ -124,7 +125,15 @@
               <div><dt>Специальности</dt><dd id="specialty-count">0</dd></div>
               <div><dt>Учебные планы</dt><dd id="curriculum-count">0</dd></div>
               <div><dt>Дисциплины</dt><dd id="discipline-count">0</dd></div>
+              <div><dt>Студенты</dt><dd id="student-count">0</dd></div>
             </dl>
+
+            <div class="change-summary" aria-label="Изменения списка студентов">
+              <strong>Изменения студентов</strong>
+              <span>Новые: <b id="student-created">0</b></span>
+              <span>Изменены: <b id="student-updated">0</b></span>
+              <span>Будут деактивированы: <b id="student-deactivated">0</b></span>
+            </div>
 
             <div class="preview-block">
               <h3>Фрагмент данных</h3>

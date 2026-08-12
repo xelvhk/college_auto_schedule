@@ -16,12 +16,13 @@ from rasp.domain.models import (
     Group,
     ImportBatch,
     Specialty,
+    Student,
     Teacher,
     WorkloadItem,
 )
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -68,6 +69,24 @@ CREATE TABLE IF NOT EXISTS student_groups (
     PRIMARY KEY (import_version_id, group_code),
     FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
         ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS students (
+    import_version_id INTEGER NOT NULL,
+    student_code TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    group_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    enrollment_date TEXT,
+    end_date TEXT,
+    subgroup_codes TEXT NOT NULL DEFAULT '',
+    elective_codes TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (import_version_id, student_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (import_version_id, group_code)
+        REFERENCES student_groups(import_version_id, group_code)
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS specialties (
@@ -174,6 +193,7 @@ class ImportReceipt:
     specialty_count: int
     curriculum_count: int
     discipline_count: int
+    student_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +293,7 @@ class SqliteImportRepository:
                     specialty_count = len(batch.specialties)
                     curriculum_count = len(batch.curricula)
                     discipline_count = len(batch.disciplines)
+                    student_count = len(batch.students)
 
                 if existing is not None:
                     (
@@ -282,6 +303,7 @@ class SqliteImportRepository:
                         specialty_count,
                         curriculum_count,
                         discipline_count,
+                        student_count,
                     ) = counts
 
                 connection.execute(
@@ -305,12 +327,13 @@ class SqliteImportRepository:
             specialty_count=specialty_count,
             curriculum_count=curriculum_count,
             discipline_count=discipline_count,
+            student_count=student_count,
         )
 
     @staticmethod
     def _version_counts(
         connection: sqlite3.Connection, version_id: int
-    ) -> tuple[int, int, int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, int, int]:
         teachers = connection.execute(
             "SELECT COUNT(*) FROM teachers WHERE import_version_id = ?",
             (version_id,),
@@ -335,6 +358,10 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM curriculum_disciplines WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
+        students = connection.execute(
+            "SELECT COUNT(*) FROM students WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -342,6 +369,7 @@ class SqliteImportRepository:
             int(specialties),
             int(curricula),
             int(disciplines),
+            int(students),
         )
 
     def _insert_batch(
@@ -425,6 +453,25 @@ class SqliteImportRepository:
                     int(item.active),
                 )
                 for item in batch.teachers
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO students VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    version_id,
+                    item.student_code,
+                    item.full_name,
+                    item.group_code,
+                    item.status.value,
+                    item.enrollment_date.isoformat() if item.enrollment_date else None,
+                    item.end_date.isoformat() if item.end_date else None,
+                    ";".join(str(code) for code in item.subgroup_codes),
+                    ";".join(item.elective_codes),
+                )
+                for item in batch.students
             ],
         )
         connection.executemany(
@@ -596,6 +643,13 @@ class SqliteImportRepository:
                     """,
                     (version_id,),
                 ).fetchall()
+                student_rows = connection.execute(
+                    """
+                    SELECT * FROM students
+                    WHERE import_version_id = ? ORDER BY student_code
+                    """,
+                    (version_id,),
+                ).fetchall()
         except sqlite3.Error as error:
             raise StorageError("Unable to read active import") from error
 
@@ -615,6 +669,7 @@ class SqliteImportRepository:
                 disciplines=tuple(
                     self._discipline_from_row(row) for row in discipline_rows
                 ),
+                students=tuple(self._student_from_row(row) for row in student_rows),
             )
         except ValidationError as error:
             raise StorageError("Database contains invalid stored data") from error
@@ -704,4 +759,17 @@ class SqliteImportRepository:
             lesson_type=row["lesson_type"],
             planned_hours=row["planned_hours"],
             control_form=row["control_form"],
+        )
+
+    @staticmethod
+    def _student_from_row(row: sqlite3.Row) -> Student:
+        return Student(
+            student_code=row["student_code"],
+            full_name=row["full_name"],
+            group_code=row["group_code"],
+            status=row["status"],
+            enrollment_date=row["enrollment_date"],
+            end_date=row["end_date"],
+            subgroup_codes=row["subgroup_codes"],
+            elective_codes=row["elective_codes"],
         )

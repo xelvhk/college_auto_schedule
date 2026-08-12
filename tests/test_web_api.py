@@ -60,6 +60,8 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["specialties"], 1)
         self.assertEqual(payload["counts"]["curricula"], 1)
         self.assertEqual(payload["counts"]["disciplines"], 1)
+        self.assertEqual(payload["counts"]["students"], 1)
+        self.assertEqual(payload["studentChanges"]["created"], 1)
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 
@@ -80,6 +82,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["activeVersionId"], 1)
         self.assertEqual(status.json()["counts"]["disciplines"], 1)
+        self.assertEqual(status.json()["counts"]["students"], 1)
 
     def test_curriculum_mismatch_does_not_replace_active_version(self) -> None:
         self.upload("/api/imports/activate", "valid-import.xlsx")
@@ -103,6 +106,39 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(status.json()["activeVersionId"], 1)
         self.assertEqual(len(status.json()["versions"]), 1)
+
+    def test_preview_compares_students_with_active_version(self) -> None:
+        self.upload("/api/imports/activate", "valid-import.xlsx")
+        source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
+        workbook = load_workbook(source)
+        students = workbook["Студенты"]
+        students["B2"] = "Петров Пётр Сергеевич"
+        students.append(
+            [
+                "S-002",
+                "Сидорова Анна Олеговна",
+                "ИС-101",
+                "active",
+                "2026-09-01",
+                None,
+                "1",
+                None,
+            ]
+        )
+        changed = BytesIO()
+        workbook.save(changed)
+        workbook.close()
+
+        preview = self.client.post(
+            "/api/imports/preview",
+            files={"file": ("students.xlsx", changed.getvalue(), XLSX_CONTENT_TYPE)},
+        )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(
+            preview.json()["studentChanges"],
+            {"created": 1, "updated": 1, "deactivated": 0},
+        )
 
     def test_saved_version_can_be_reactivated_and_unknown_version_is_404(self) -> None:
         self.upload("/api/imports/activate", "valid-import.xlsx")

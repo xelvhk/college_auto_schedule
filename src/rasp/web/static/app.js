@@ -19,6 +19,10 @@ const elements = {
   specialtyCount: document.querySelector("#specialty-count"),
   curriculumCount: document.querySelector("#curriculum-count"),
   disciplineCount: document.querySelector("#discipline-count"),
+  studentCount: document.querySelector("#student-count"),
+  studentCreated: document.querySelector("#student-created"),
+  studentUpdated: document.querySelector("#student-updated"),
+  studentDeactivated: document.querySelector("#student-deactivated"),
   teacherPreview: document.querySelector("#teacher-preview"),
   systemState: document.querySelector("#system-state"),
   activeSummary: document.querySelector("#active-summary"),
@@ -145,6 +149,10 @@ async function previewFile() {
     elements.specialtyCount.textContent = payload.counts.specialties;
     elements.curriculumCount.textContent = payload.counts.curricula;
     elements.disciplineCount.textContent = payload.counts.disciplines;
+    elements.studentCount.textContent = payload.counts.students;
+    elements.studentCreated.textContent = payload.studentChanges.created;
+    elements.studentUpdated.textContent = payload.studentChanges.updated;
+    elements.studentDeactivated.textContent = payload.studentChanges.deactivated;
     renderTeacherRows(payload.samples.teachers);
     elements.preview.hidden = false;
     elements.activateButton.disabled = false;
@@ -210,7 +218,7 @@ function renderStatus(payload) {
     const value = document.createElement("strong");
     value.textContent = `№${payload.activeVersionId}`;
     const counts = document.createElement("small");
-    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.disciplines} дисциплин`;
+    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.students} студентов`;
     elements.activeSummary.append(label, value, counts);
   }
 

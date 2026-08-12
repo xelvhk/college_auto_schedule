@@ -128,6 +128,29 @@ const sheets = [
     ],
   },
   {
+    name: "Студенты",
+    headers: [
+      "student_code",
+      "full_name",
+      "group_code",
+      "status",
+      "enrollment_date",
+      "end_date",
+      "subgroup_codes",
+      "elective_codes",
+    ],
+    example: [
+      "S-001",
+      "Петров Пётр Петрович",
+      "ИС-101",
+      "active",
+      new Date("2026-09-01T00:00:00Z"),
+      null,
+      "1",
+      "WEB",
+    ],
+  },
+  {
     name: "Нагрузка",
     headers: [
       "workload_row_code",
@@ -194,6 +217,10 @@ for (const definition of sheets) {
 
 workbook.worksheets
   .getItem("Учебные планы")
+  .getRange("E2:F2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Студенты")
   .getRange("E2:F2")
   .setNumberFormat("yyyy-mm-dd");
 
