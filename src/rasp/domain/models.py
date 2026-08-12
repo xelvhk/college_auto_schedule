@@ -230,6 +230,65 @@ class Student(DomainModel):
         return self
 
 
+class Building(DomainModel):
+    building_code: Code
+    building_name: ShortText
+    active: bool = True
+
+    @field_validator("building_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return value.upper()
+
+
+class RoomType(DomainModel):
+    room_type_code: Code
+    room_type_name: ShortText
+    active: bool = True
+
+    @field_validator("room_type_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return value.upper()
+
+
+class Equipment(DomainModel):
+    equipment_code: Code
+    equipment_name: ShortText
+    active: bool = True
+
+    @field_validator("equipment_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return value.upper()
+
+
+class Room(DomainModel):
+    room_code: Code
+    room_name: ShortText
+    building_code: Code
+    room_type_code: Code
+    capacity: PositiveInt
+    equipment_codes: tuple[Code, ...] = ()
+    active: bool = True
+
+    @field_validator("room_code", "building_code", "room_type_code")
+    @classmethod
+    def normalize_codes(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("equipment_codes", mode="before")
+    @classmethod
+    def parse_equipment(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = tuple(part.strip() for part in value.split(";") if part.strip())
+        if isinstance(value, (tuple, list)):
+            return tuple(sorted({str(part).strip().upper() for part in value}))
+        return value
+
+
 class WorkloadItem(DomainModel):
     workload_row_code: Code
     academic_year: Annotated[
@@ -249,6 +308,7 @@ class WorkloadItem(DomainModel):
     lesson_bundle_code: Code | None = None
     room_type: str | None = Field(default=None, max_length=64)
     room_capacity: int | None = Field(default=None, gt=0)
+    required_equipment_codes: tuple[Code, ...] = ()
 
     @field_validator(
         "workload_row_code",
@@ -256,10 +316,22 @@ class WorkloadItem(DomainModel):
         "group_code",
         "teacher_code",
         "lesson_bundle_code",
+        "room_type",
     )
     @classmethod
     def normalize_codes(cls, value: str | None) -> str | None:
         return value.upper() if value is not None else None
+
+    @field_validator("required_equipment_codes", mode="before")
+    @classmethod
+    def parse_required_equipment(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = tuple(part.strip() for part in value.split(";") if part.strip())
+        if isinstance(value, (tuple, list)):
+            return tuple(sorted({str(part).strip().upper() for part in value}))
+        return value
 
     @model_validator(mode="after")
     def hours_form_whole_events(self) -> WorkloadItem:
@@ -278,6 +350,10 @@ class ImportBatch(DomainModel):
     curricula: tuple[Curriculum, ...] = ()
     disciplines: tuple[CurriculumDiscipline, ...] = ()
     students: tuple[Student, ...] = ()
+    buildings: tuple[Building, ...] = ()
+    room_types: tuple[RoomType, ...] = ()
+    equipment: tuple[Equipment, ...] = ()
+    rooms: tuple[Room, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):

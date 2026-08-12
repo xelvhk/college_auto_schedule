@@ -8,7 +8,16 @@ from tempfile import TemporaryDirectory
 from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
-from rasp.domain.models import Group, Student, Teacher, WorkloadItem
+from rasp.domain.models import (
+    Building,
+    Equipment,
+    Group,
+    Room,
+    RoomType,
+    Student,
+    Teacher,
+    WorkloadItem,
+)
 from rasp.imports.excel import (
     ImportValidationError,
     build_import_batch,
@@ -54,6 +63,24 @@ class DomainModelTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             Student(**(student.model_dump() | {"end_date": "2026-08-31"}))
+
+    def test_room_normalizes_equipment_and_requires_positive_capacity(self) -> None:
+        room = Room(
+            room_code=" main-201 ",
+            room_name="Лаборатория 201",
+            building_code=" main ",
+            room_type_code=" computer_lab ",
+            capacity=25,
+            equipment_codes=" projector ; computers ",
+        )
+
+        self.assertEqual(room.room_code, "MAIN-201")
+        self.assertEqual(room.building_code, "MAIN")
+        self.assertEqual(room.room_type_code, "COMPUTER_LAB")
+        self.assertEqual(room.equipment_codes, ("COMPUTERS", "PROJECTOR"))
+
+        with self.assertRaises(ValidationError):
+            Room(**(room.model_dump() | {"capacity": 0}))
 
 
 class ImportBatchTests(unittest.TestCase):
@@ -166,6 +193,44 @@ class ImportBatchTests(unittest.TestCase):
             )
 
         self.assertIn("unknown_subgroup", {i.code for i in raised.exception.issues})
+
+    def test_validates_room_references(self) -> None:
+        common = {
+            "teacher_rows": self.teacher_rows,
+            "group_rows": self.group_rows,
+            "workload_rows": self.workload_rows,
+            "building_rows": [
+                {"building_code": "MAIN", "building_name": "Главный корпус"}
+            ],
+            "room_type_rows": [
+                {
+                    "room_type_code": "COMPUTER_LAB",
+                    "room_type_name": "Компьютерный класс",
+                }
+            ],
+            "equipment_rows": [
+                {"equipment_code": "COMPUTERS", "equipment_name": "Компьютеры"}
+            ],
+        }
+        room_rows = [
+            {
+                "room_code": "MAIN-201",
+                "room_name": "Лаборатория 201",
+                "building_code": "MAIN",
+                "room_type_code": "COMPUTER_LAB",
+                "capacity": 25,
+                "equipment_codes": "COMPUTERS",
+            }
+        ]
+
+        batch = build_import_batch(**common, room_rows=room_rows)
+        self.assertEqual(batch.rooms[0].equipment_codes, ("COMPUTERS",))
+
+        room_rows[0]["building_code"] = "UNKNOWN"
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(**common, room_rows=room_rows)
+
+        self.assertIn("unknown_room_building", {i.code for i in raised.exception.issues})
 
 
 class WorkbookImportTests(unittest.TestCase):
@@ -297,6 +362,10 @@ class WorkbookImportTests(unittest.TestCase):
         self.assertEqual(batch.workloads[0].workload_row_code, "W-001")
         self.assertEqual(batch.specialties[0].specialty_code, "09.02.07")
         self.assertEqual(batch.students[0].student_code, "S-001")
+        self.assertEqual(batch.buildings[0].building_code, "MAIN")
+        self.assertEqual(batch.room_types[0].room_type_code, "COMPUTER_LAB")
+        self.assertEqual(batch.equipment[0].equipment_code, "COMPUTERS")
+        self.assertEqual(batch.rooms[0].room_code, "MAIN-201")
 
     def test_rejects_non_xlsx_file_before_parsing(self) -> None:
         with self.assertRaises(ImportValidationError) as raised:

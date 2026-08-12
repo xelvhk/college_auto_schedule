@@ -7,10 +7,14 @@ from contextlib import closing
 from pathlib import Path
 
 from rasp.domain.models import (
+    Building,
     Curriculum,
     CurriculumDiscipline,
+    Equipment,
     Group,
     ImportBatch,
+    Room,
+    RoomType,
     Specialty,
     Student,
     Teacher,
@@ -101,6 +105,31 @@ def make_full_batch() -> ImportBatch:
                     elective_codes=("WEB",),
                 ),
             ),
+            "buildings": (
+                Building(building_code="MAIN", building_name="Главный корпус"),
+            ),
+            "room_types": (
+                RoomType(
+                    room_type_code="COMPUTER_LAB",
+                    room_type_name="Компьютерный класс",
+                ),
+            ),
+            "equipment": (
+                Equipment(
+                    equipment_code="COMPUTERS",
+                    equipment_name="Компьютеры",
+                ),
+            ),
+            "rooms": (
+                Room(
+                    room_code="MAIN-201",
+                    room_name="Лаборатория 201",
+                    building_code="MAIN",
+                    room_type_code="COMPUTER_LAB",
+                    capacity=25,
+                    equipment_codes=("COMPUTERS",),
+                ),
+            ),
         }
     )
 
@@ -128,7 +157,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertFalse(receipt.reused)
         self.assertEqual(restored, make_batch())
 
-    def test_atomically_activates_and_restores_all_six_sections(self) -> None:
+    def test_atomically_activates_and_restores_all_sections(self) -> None:
         receipt = self.repository.activate_import(
             make_full_batch(),
             source_name="full-import.xlsx",
@@ -141,6 +170,10 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(receipt.curriculum_count, 1)
         self.assertEqual(receipt.discipline_count, 1)
         self.assertEqual(receipt.student_count, 1)
+        self.assertEqual(receipt.building_count, 1)
+        self.assertEqual(receipt.room_type_count, 1)
+        self.assertEqual(receipt.equipment_count, 1)
+        self.assertEqual(receipt.room_count, 1)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
@@ -316,7 +349,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

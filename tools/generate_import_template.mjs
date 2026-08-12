@@ -151,6 +151,42 @@ const sheets = [
     ],
   },
   {
+    name: "Корпуса",
+    headers: ["building_code", "building_name", "active"],
+    example: ["MAIN", "Главный корпус", true],
+  },
+  {
+    name: "Типы помещений",
+    headers: ["room_type_code", "room_type_name", "active"],
+    example: ["COMPUTER_LAB", "Компьютерный класс", true],
+  },
+  {
+    name: "Оборудование",
+    headers: ["equipment_code", "equipment_name", "active"],
+    example: ["COMPUTERS", "Компьютеры", true],
+  },
+  {
+    name: "Аудитории",
+    headers: [
+      "room_code",
+      "room_name",
+      "building_code",
+      "room_type_code",
+      "capacity",
+      "equipment_codes",
+      "active",
+    ],
+    example: [
+      "MAIN-201",
+      "Лаборатория 201",
+      "MAIN",
+      "COMPUTER_LAB",
+      25,
+      "COMPUTERS",
+      true,
+    ],
+  },
+  {
     name: "Нагрузка",
     headers: [
       "workload_row_code",
@@ -169,6 +205,7 @@ const sheets = [
       "lesson_bundle_code",
       "room_type",
       "room_capacity",
+      "required_equipment_codes",
     ],
     example: [
       "W-001",
@@ -187,6 +224,7 @@ const sheets = [
       null,
       "computer_lab",
       25,
+      "COMPUTERS",
     ],
   },
 ];

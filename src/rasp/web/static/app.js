@@ -23,6 +23,10 @@ const elements = {
   studentCreated: document.querySelector("#student-created"),
   studentUpdated: document.querySelector("#student-updated"),
   studentDeactivated: document.querySelector("#student-deactivated"),
+  buildingCount: document.querySelector("#building-count"),
+  roomCount: document.querySelector("#room-count"),
+  roomDeficitSummary: document.querySelector("#room-deficit-summary"),
+  roomDeficitText: document.querySelector("#room-deficit-text"),
   teacherPreview: document.querySelector("#teacher-preview"),
   systemState: document.querySelector("#system-state"),
   activeSummary: document.querySelector("#active-summary"),
@@ -153,6 +157,13 @@ async function previewFile() {
     elements.studentCreated.textContent = payload.studentChanges.created;
     elements.studentUpdated.textContent = payload.studentChanges.updated;
     elements.studentDeactivated.textContent = payload.studentChanges.deactivated;
+    elements.buildingCount.textContent = payload.counts.buildings;
+    elements.roomCount.textContent = payload.counts.rooms;
+    const deficitCount = payload.roomDeficits.length;
+    elements.roomDeficitSummary.hidden = deficitCount === 0;
+    elements.roomDeficitText.textContent = deficitCount
+      ? `${deficitCount} строк нагрузки не имеют подходящей аудитории. Импорт разрешён, расчёт расписания потребует исправления.`
+      : "";
     renderTeacherRows(payload.samples.teachers);
     elements.preview.hidden = false;
     elements.activateButton.disabled = false;
@@ -218,7 +229,7 @@ function renderStatus(payload) {
     const value = document.createElement("strong");
     value.textContent = `№${payload.activeVersionId}`;
     const counts = document.createElement("small");
-    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.students} студентов`;
+    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.students} студентов · ${payload.counts.rooms} аудиторий`;
     elements.activeSummary.append(label, value, counts);
   }
 

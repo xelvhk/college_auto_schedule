@@ -16,7 +16,10 @@ from rasp.application.imports import (
     validate_and_activate_workbook,
     validate_curriculum_readiness,
 )
-from rasp.application.readiness import ReadinessSeverity
+from rasp.application.readiness import (
+    ReadinessSeverity,
+    analyze_room_supply,
+)
 from rasp.domain.models import ImportBatch
 from rasp.imports.excel import (
     MAX_FILE_SIZE,
@@ -52,6 +55,10 @@ def _counts(batch: ImportBatch | None) -> dict[str, int]:
         "curricula": len(batch.curricula) if batch else 0,
         "disciplines": len(batch.disciplines) if batch else 0,
         "students": len(batch.students) if batch else 0,
+        "buildings": len(batch.buildings) if batch else 0,
+        "roomTypes": len(batch.room_types) if batch else 0,
+        "equipment": len(batch.equipment) if batch else 0,
+        "rooms": len(batch.rooms) if batch else 0,
     }
 
 
@@ -236,6 +243,16 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "fileName": Path(file.filename or "import.xlsx").name,
                 "counts": _counts(batch),
                 "studentChanges": _student_changes(batch, active_batch),
+                "roomDeficits": [
+                    {
+                        "workloadRowCode": item.workload_row_code,
+                        "groupCode": item.group_code,
+                        "requiredRoomType": item.required_room_type,
+                        "requiredCapacity": item.required_capacity,
+                        "requiredEquipmentCodes": item.required_equipment_codes,
+                    }
+                    for item in analyze_room_supply(batch)
+                ],
                 "warnings": _readiness_warnings(batch),
                 "samples": {
                     "teachers": [
@@ -295,6 +312,16 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                         }
                         for item in batch.students[:5]
                     ],
+                    "rooms": [
+                        {
+                            "roomCode": item.room_code,
+                            "roomName": item.room_name,
+                            "buildingCode": item.building_code,
+                            "roomTypeCode": item.room_type_code,
+                            "capacity": item.capacity,
+                        }
+                        for item in batch.rooms[:5]
+                    ],
                 },
             }
         )
@@ -323,6 +350,10 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "curricula": receipt.curriculum_count,
                     "disciplines": receipt.discipline_count,
                     "students": receipt.student_count,
+                    "buildings": receipt.building_count,
+                    "roomTypes": receipt.room_type_count,
+                    "equipment": receipt.equipment_count,
+                    "rooms": receipt.room_count,
                 },
             },
         )

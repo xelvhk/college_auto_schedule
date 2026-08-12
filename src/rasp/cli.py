@@ -41,9 +41,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _print_json(payload: object) -> None:
-    print(
-        json.dumps(payload, ensure_ascii=False, indent=2)
-    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _print_validation_error(error: ImportValidationError) -> None:
@@ -82,6 +80,10 @@ def _validate(file_path: Path) -> int:
                 "curricula": len(batch.curricula),
                 "disciplines": len(batch.disciplines),
                 "students": len(batch.students),
+                "buildings": len(batch.buildings),
+                "roomTypes": len(batch.room_types),
+                "equipment": len(batch.equipment),
+                "rooms": len(batch.rooms),
             },
         }
     )
@@ -118,6 +120,10 @@ def _activate(file_path: Path, database_path: Path) -> int:
                 "curricula": receipt.curriculum_count,
                 "disciplines": receipt.discipline_count,
                 "students": receipt.student_count,
+                "buildings": receipt.building_count,
+                "roomTypes": receipt.room_type_count,
+                "equipment": receipt.equipment_count,
+                "rooms": receipt.room_count,
             },
         }
     )
@@ -151,6 +157,10 @@ def _status(database_path: Path) -> int:
                 "curricula": len(batch.curricula) if batch else 0,
                 "disciplines": len(batch.disciplines) if batch else 0,
                 "students": len(batch.students) if batch else 0,
+                "buildings": len(batch.buildings) if batch else 0,
+                "roomTypes": len(batch.room_types) if batch else 0,
+                "equipment": len(batch.equipment) if batch else 0,
+                "rooms": len(batch.rooms) if batch else 0,
             },
             "versions": [
                 {

@@ -11,9 +11,13 @@ from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, ValidationError
 
 from rasp.domain.models import (
+    Building,
+    Equipment,
     Group,
     ImportBatch,
     ReferenceDataBatch,
+    Room,
+    RoomType,
     Student,
     Teacher,
     WorkloadItem,
@@ -57,8 +61,13 @@ REFERENCE_SHEETS = {
     "Учебные планы": "curricula",
     "Дисциплины": "disciplines",
 }
-STUDENT_SHEET = {"Студенты": "students"}
-SHEETS = CORE_SHEETS | REFERENCE_SHEETS
+STUDENT_SHEETS = {"Студенты": "students"}
+ROOM_SHEETS = {
+    "Корпуса": "buildings",
+    "Типы помещений": "room_types",
+    "Оборудование": "equipment",
+    "Аудитории": "rooms",
+}
 FORBIDDEN_STUDENT_HEADERS = {
     "address",
     "attendance",
@@ -121,6 +130,16 @@ REQUIRED_HEADERS = {
         "planned_hours",
     },
     "Студенты": {"student_code", "full_name", "group_code", "status"},
+    "Корпуса": {"building_code", "building_name"},
+    "Типы помещений": {"room_type_code", "room_type_name"},
+    "Оборудование": {"equipment_code", "equipment_name"},
+    "Аудитории": {
+        "room_code",
+        "room_name",
+        "building_code",
+        "room_type_code",
+        "capacity",
+    },
 }
 
 
@@ -183,6 +202,10 @@ def build_import_batch(
     curriculum_rows: Iterable[Mapping[str, Any]] | None = None,
     discipline_rows: Iterable[Mapping[str, Any]] | None = None,
     student_rows: Iterable[Mapping[str, Any]] | None = None,
+    building_rows: Iterable[Mapping[str, Any]] | None = None,
+    room_type_rows: Iterable[Mapping[str, Any]] | None = None,
+    equipment_rows: Iterable[Mapping[str, Any]] | None = None,
+    room_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -197,6 +220,28 @@ def build_import_batch(
     if student_rows is not None:
         students, student_issues = _parse_rows("students", student_rows, Student)
         issues.extend(student_issues)
+    buildings: list[Building] = []
+    room_types: list[RoomType] = []
+    equipment: list[Equipment] = []
+    rooms: list[Room] = []
+    room_inputs = (building_rows, room_type_rows, equipment_rows, room_rows)
+    if any(rows is not None for rows in room_inputs):
+        if not all(rows is not None for rows in room_inputs):
+            issues.append(
+                ImportIssue(
+                    "file", 0, None, "incomplete_room_data",
+                    "All room reference sections must be provided together",
+                )
+            )
+        else:
+            buildings, parsed = _parse_rows("buildings", building_rows or (), Building)
+            issues.extend(parsed)
+            room_types, parsed = _parse_rows("room_types", room_type_rows or (), RoomType)
+            issues.extend(parsed)
+            equipment, parsed = _parse_rows("equipment", equipment_rows or (), Equipment)
+            issues.extend(parsed)
+            rooms, parsed = _parse_rows("rooms", room_rows or (), Room)
+            issues.extend(parsed)
 
     issues.extend(_duplicate_issues("teachers", teachers, "teacher_code"))
     issues.extend(_duplicate_issues("groups", groups, "group_code"))
@@ -204,6 +249,10 @@ def build_import_batch(
         _duplicate_issues("workloads", workloads, "workload_row_code")
     )
     issues.extend(_duplicate_issues("students", students, "student_code"))
+    issues.extend(_duplicate_issues("buildings", buildings, "building_code"))
+    issues.extend(_duplicate_issues("room_types", room_types, "room_type_code"))
+    issues.extend(_duplicate_issues("equipment", equipment, "equipment_code"))
+    issues.extend(_duplicate_issues("rooms", rooms, "room_code"))
 
     teacher_codes = {teacher.teacher_code for teacher in teachers}
     group_codes = {group.group_code for group in groups}
@@ -254,6 +303,93 @@ def build_import_batch(
                         "Student subgroup is outside the group's configured range",
                     )
                 )
+
+    building_codes = {item.building_code for item in buildings}
+    room_type_codes = {item.room_type_code for item in room_types}
+    equipment_codes = {item.equipment_code for item in equipment}
+    if buildings:
+        for row_number, teacher in enumerate(teachers, start=2):
+            if (
+                teacher.home_building_code
+                and teacher.home_building_code not in building_codes
+            ):
+                issues.append(
+                    ImportIssue(
+                        "teachers",
+                        row_number,
+                        "home_building_code",
+                        "unknown_teacher_building",
+                        "Teacher references an unknown home building",
+                    )
+                )
+        for row_number, group in enumerate(groups, start=2):
+            if (
+                group.primary_building_code
+                and group.primary_building_code not in building_codes
+            ):
+                issues.append(
+                    ImportIssue(
+                        "groups",
+                        row_number,
+                        "primary_building_code",
+                        "unknown_group_building",
+                        "Group references an unknown primary building",
+                    )
+                )
+    for row_number, room in enumerate(rooms, start=2):
+        if room.building_code not in building_codes:
+            issues.append(
+                ImportIssue(
+                    "rooms",
+                    row_number,
+                    "building_code",
+                    "unknown_room_building",
+                    "Room references an unknown building",
+                )
+            )
+        if room.room_type_code not in room_type_codes:
+            issues.append(
+                ImportIssue(
+                    "rooms",
+                    row_number,
+                    "room_type_code",
+                    "unknown_room_type",
+                    "Room references an unknown room type",
+                )
+            )
+        if unknown := set(room.equipment_codes) - equipment_codes:
+            issues.append(
+                ImportIssue(
+                    "rooms",
+                    row_number,
+                    "equipment_codes",
+                    "unknown_room_equipment",
+                    f"Room references unknown equipment codes: {', '.join(sorted(unknown))}",
+                )
+            )
+    if room_types:
+        for row_number, workload in enumerate(workloads, start=2):
+            if workload.room_type and workload.room_type not in room_type_codes:
+                issues.append(
+                    ImportIssue(
+                        "workloads",
+                        row_number,
+                        "room_type",
+                        "unknown_required_room_type",
+                        "Workload references an unknown room type",
+                    )
+                )
+            if unknown := set(workload.required_equipment_codes) - equipment_codes:
+                unknown_codes = ", ".join(sorted(unknown))
+                issues.append(
+                    ImportIssue(
+                        "workloads",
+                        row_number,
+                        "required_equipment_codes",
+                        "unknown_required_equipment",
+                        f"Workload references unknown equipment codes: {unknown_codes}",
+                    )
+                )
     references = ReferenceDataBatch(specialties=(), curricula=(), disciplines=())
     reference_inputs = (specialty_rows, curriculum_rows, discipline_rows)
     if any(rows is not None for rows in reference_inputs):
@@ -291,6 +427,10 @@ def build_import_batch(
         groups=tuple(groups),
         workloads=tuple(workloads),
         students=tuple(students),
+        buildings=tuple(buildings),
+        room_types=tuple(room_types),
+        equipment=tuple(equipment),
+        rooms=tuple(rooms),
     )
     if issues:
         raise ImportValidationError(issues)
@@ -536,10 +676,13 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         available_sheets = set(workbook.sheetnames)
         missing_sheets = set(CORE_SHEETS) - available_sheets
         reference_sheets_present = set(REFERENCE_SHEETS) & available_sheets
+        room_sheets_present = set(ROOM_SHEETS) & available_sheets
         if reference_sheets_present and reference_sheets_present != set(
             REFERENCE_SHEETS
         ):
             missing_sheets |= set(REFERENCE_SHEETS) - available_sheets
+        if room_sheets_present and room_sheets_present != set(ROOM_SHEETS):
+            missing_sheets |= set(ROOM_SHEETS) - available_sheets
         if missing_sheets:
             raise ImportValidationError(
                 [
@@ -559,7 +702,9 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         if reference_sheets_present:
             selected_sheets.update(REFERENCE_SHEETS)
         if "Студенты" in available_sheets:
-            selected_sheets.update(STUDENT_SHEET)
+            selected_sheets.update(STUDENT_SHEETS)
+        if room_sheets_present:
+            selected_sheets.update(ROOM_SHEETS)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -576,6 +721,10 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             curriculum_rows=rows.get("curricula"),
             discipline_rows=rows.get("disciplines"),
             student_rows=rows.get("students"),
+            building_rows=rows.get("buildings"),
+            room_type_rows=rows.get("room_types"),
+            equipment_rows=rows.get("equipment"),
+            room_rows=rows.get("rooms"),
         )
     finally:
         workbook.close()

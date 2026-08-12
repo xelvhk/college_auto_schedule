@@ -11,10 +11,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from rasp.domain.models import (
+    Building,
     Curriculum,
     CurriculumDiscipline,
+    Equipment,
     Group,
     ImportBatch,
+    Room,
+    RoomType,
     Specialty,
     Student,
     Teacher,
@@ -22,7 +26,7 @@ from rasp.domain.models import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -86,6 +90,69 @@ CREATE TABLE IF NOT EXISTS students (
         ON DELETE CASCADE,
     FOREIGN KEY (import_version_id, group_code)
         REFERENCES student_groups(import_version_id, group_code)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE IF NOT EXISTS buildings (
+    import_version_id INTEGER NOT NULL,
+    building_code TEXT NOT NULL,
+    building_name TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, building_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS room_types (
+    import_version_id INTEGER NOT NULL,
+    room_type_code TEXT NOT NULL,
+    room_type_name TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, room_type_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS equipment (
+    import_version_id INTEGER NOT NULL,
+    equipment_code TEXT NOT NULL,
+    equipment_name TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, equipment_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rooms (
+    import_version_id INTEGER NOT NULL,
+    room_code TEXT NOT NULL,
+    room_name TEXT NOT NULL,
+    building_code TEXT NOT NULL,
+    room_type_code TEXT NOT NULL,
+    capacity INTEGER NOT NULL CHECK(capacity > 0),
+    equipment_codes TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, room_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (import_version_id, building_code)
+        REFERENCES buildings(import_version_id, building_code)
+        DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (import_version_id, room_type_code)
+        REFERENCES room_types(import_version_id, room_type_code)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE IF NOT EXISTS room_equipment (
+    import_version_id INTEGER NOT NULL,
+    room_code TEXT NOT NULL,
+    equipment_code TEXT NOT NULL,
+    PRIMARY KEY (import_version_id, room_code, equipment_code),
+    FOREIGN KEY (import_version_id, room_code)
+        REFERENCES rooms(import_version_id, room_code)
+        ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (import_version_id, equipment_code)
+        REFERENCES equipment(import_version_id, equipment_code)
         DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -161,6 +228,7 @@ CREATE TABLE IF NOT EXISTS workload_items (
     lesson_bundle_code TEXT,
     room_type TEXT,
     room_capacity INTEGER,
+    required_equipment_codes TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (import_version_id, workload_row_code),
     FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
         ON DELETE CASCADE,
@@ -194,6 +262,10 @@ class ImportReceipt:
     curriculum_count: int
     discipline_count: int
     student_count: int
+    building_count: int
+    room_type_count: int
+    equipment_count: int
+    room_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +310,17 @@ class SqliteImportRepository:
                 if current_version == 1:
                     connection.execute(
                         "ALTER TABLE student_groups ADD COLUMN curriculum_code TEXT"
+                    )
+                workload_columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(workload_items)"
+                    ).fetchall()
+                }
+                if "required_equipment_codes" not in workload_columns:
+                    connection.execute(
+                        "ALTER TABLE workload_items "
+                        "ADD COLUMN required_equipment_codes TEXT NOT NULL DEFAULT ''"
                     )
                 if current_version < SCHEMA_VERSION:
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -294,6 +377,10 @@ class SqliteImportRepository:
                     curriculum_count = len(batch.curricula)
                     discipline_count = len(batch.disciplines)
                     student_count = len(batch.students)
+                    building_count = len(batch.buildings)
+                    room_type_count = len(batch.room_types)
+                    equipment_count = len(batch.equipment)
+                    room_count = len(batch.rooms)
 
                 if existing is not None:
                     (
@@ -304,6 +391,10 @@ class SqliteImportRepository:
                         curriculum_count,
                         discipline_count,
                         student_count,
+                        building_count,
+                        room_type_count,
+                        equipment_count,
+                        room_count,
                     ) = counts
 
                 connection.execute(
@@ -328,12 +419,16 @@ class SqliteImportRepository:
             curriculum_count=curriculum_count,
             discipline_count=discipline_count,
             student_count=student_count,
+            building_count=building_count,
+            room_type_count=room_type_count,
+            equipment_count=equipment_count,
+            room_count=room_count,
         )
 
     @staticmethod
     def _version_counts(
         connection: sqlite3.Connection, version_id: int
-    ) -> tuple[int, int, int, int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
         teachers = connection.execute(
             "SELECT COUNT(*) FROM teachers WHERE import_version_id = ?",
             (version_id,),
@@ -362,6 +457,18 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM students WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
+        buildings = connection.execute(
+            "SELECT COUNT(*) FROM buildings WHERE import_version_id = ?", (version_id,)
+        ).fetchone()[0]
+        room_types = connection.execute(
+            "SELECT COUNT(*) FROM room_types WHERE import_version_id = ?", (version_id,)
+        ).fetchone()[0]
+        equipment = connection.execute(
+            "SELECT COUNT(*) FROM equipment WHERE import_version_id = ?", (version_id,)
+        ).fetchone()[0]
+        rooms = connection.execute(
+            "SELECT COUNT(*) FROM rooms WHERE import_version_id = ?", (version_id,)
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -370,6 +477,10 @@ class SqliteImportRepository:
             int(curricula),
             int(disciplines),
             int(students),
+            int(buildings),
+            int(room_types),
+            int(equipment),
+            int(rooms),
         )
 
     def _insert_batch(
@@ -378,6 +489,66 @@ class SqliteImportRepository:
         version_id: int,
         batch: ImportBatch,
     ) -> None:
+        connection.executemany(
+            "INSERT INTO buildings VALUES (?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.building_code,
+                    item.building_name,
+                    int(item.active),
+                )
+                for item in batch.buildings
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO room_types VALUES (?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.room_type_code,
+                    item.room_type_name,
+                    int(item.active),
+                )
+                for item in batch.room_types
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO equipment VALUES (?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.equipment_code,
+                    item.equipment_name,
+                    int(item.active),
+                )
+                for item in batch.equipment
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO rooms VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.room_code,
+                    item.room_name,
+                    item.building_code,
+                    item.room_type_code,
+                    item.capacity,
+                    ";".join(item.equipment_codes),
+                    int(item.active),
+                )
+                for item in batch.rooms
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO room_equipment VALUES (?, ?, ?)",
+            [
+                (version_id, room.room_code, equipment_code)
+                for room in batch.rooms
+                for equipment_code in room.equipment_codes
+            ],
+        )
         connection.executemany(
             """
             INSERT INTO specialties VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -510,7 +681,7 @@ class SqliteImportRepository:
         connection.executemany(
             """
             INSERT INTO workload_items VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             [
@@ -532,6 +703,7 @@ class SqliteImportRepository:
                     item.lesson_bundle_code,
                     item.room_type,
                     item.room_capacity,
+                    ";".join(item.required_equipment_codes),
                 )
                 for item in batch.workloads
             ],
@@ -650,6 +822,34 @@ class SqliteImportRepository:
                     """,
                     (version_id,),
                 ).fetchall()
+                building_rows = connection.execute(
+                    """
+                    SELECT * FROM buildings
+                    WHERE import_version_id = ? ORDER BY building_code
+                    """,
+                    (version_id,),
+                ).fetchall()
+                room_type_rows = connection.execute(
+                    """
+                    SELECT * FROM room_types
+                    WHERE import_version_id = ? ORDER BY room_type_code
+                    """,
+                    (version_id,),
+                ).fetchall()
+                equipment_rows = connection.execute(
+                    """
+                    SELECT * FROM equipment
+                    WHERE import_version_id = ? ORDER BY equipment_code
+                    """,
+                    (version_id,),
+                ).fetchall()
+                room_rows = connection.execute(
+                    """
+                    SELECT * FROM rooms
+                    WHERE import_version_id = ? ORDER BY room_code
+                    """,
+                    (version_id,),
+                ).fetchall()
         except sqlite3.Error as error:
             raise StorageError("Unable to read active import") from error
 
@@ -670,6 +870,10 @@ class SqliteImportRepository:
                     self._discipline_from_row(row) for row in discipline_rows
                 ),
                 students=tuple(self._student_from_row(row) for row in student_rows),
+                buildings=tuple(self._building_from_row(row) for row in building_rows),
+                room_types=tuple(self._room_type_from_row(row) for row in room_type_rows),
+                equipment=tuple(self._equipment_from_row(row) for row in equipment_rows),
+                rooms=tuple(self._room_from_row(row) for row in room_rows),
             )
         except ValidationError as error:
             raise StorageError("Database contains invalid stored data") from error
@@ -723,6 +927,7 @@ class SqliteImportRepository:
             lesson_bundle_code=row["lesson_bundle_code"],
             room_type=row["room_type"],
             room_capacity=row["room_capacity"],
+            required_equipment_codes=row["required_equipment_codes"],
         )
 
     @staticmethod
@@ -772,4 +977,40 @@ class SqliteImportRepository:
             end_date=row["end_date"],
             subgroup_codes=row["subgroup_codes"],
             elective_codes=row["elective_codes"],
+        )
+
+    @staticmethod
+    def _building_from_row(row: sqlite3.Row) -> Building:
+        return Building(
+            building_code=row["building_code"],
+            building_name=row["building_name"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _room_type_from_row(row: sqlite3.Row) -> RoomType:
+        return RoomType(
+            room_type_code=row["room_type_code"],
+            room_type_name=row["room_type_name"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _equipment_from_row(row: sqlite3.Row) -> Equipment:
+        return Equipment(
+            equipment_code=row["equipment_code"],
+            equipment_name=row["equipment_name"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _room_from_row(row: sqlite3.Row) -> Room:
+        return Room(
+            room_code=row["room_code"],
+            room_name=row["room_name"],
+            building_code=row["building_code"],
+            room_type_code=row["room_type_code"],
+            capacity=row["capacity"],
+            equipment_codes=row["equipment_codes"],
+            active=bool(row["active"]),
         )

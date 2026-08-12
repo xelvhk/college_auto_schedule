@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import unittest
 
-from rasp.application.readiness import analyze_curriculum_alignment
+from rasp.application.readiness import analyze_curriculum_alignment, analyze_room_supply
 from rasp.domain.models import (
+    Building,
     Curriculum,
     CurriculumDiscipline,
     Group,
     ImportBatch,
     ReferenceDataBatch,
+    Room,
+    RoomType,
     Specialty,
     Teacher,
     WorkloadItem,
@@ -161,6 +164,50 @@ class CurriculumReadinessTests(unittest.TestCase):
 
         self.assertFalse(report.is_ready)
         self.assertIn("group_without_curriculum", {issue.code for issue in report.issues})
+
+    def test_room_supply_matches_type_capacity_and_equipment(self) -> None:
+        batch = make_import_batch()
+        workload = batch.workloads[0].model_copy(
+            update={
+                "room_type": "COMPUTER_LAB",
+                "room_capacity": 25,
+                "required_equipment_codes": ("COMPUTERS",),
+            }
+        )
+        batch = batch.model_copy(
+            update={
+                "workloads": (workload,),
+                "buildings": (
+                    Building(building_code="MAIN", building_name="Главный корпус"),
+                ),
+                "room_types": (
+                    RoomType(
+                        room_type_code="COMPUTER_LAB",
+                        room_type_name="Компьютерный класс",
+                    ),
+                ),
+                "rooms": (
+                    Room(
+                        room_code="MAIN-201",
+                        room_name="Лаборатория 201",
+                        building_code="MAIN",
+                        room_type_code="COMPUTER_LAB",
+                        capacity=25,
+                        equipment_codes=("COMPUTERS",),
+                    ),
+                ),
+            }
+        )
+
+        self.assertEqual(analyze_room_supply(batch), ())
+
+        undersized = batch.rooms[0].model_copy(update={"capacity": 24})
+        deficits = analyze_room_supply(
+            batch.model_copy(update={"rooms": (undersized,)})
+        )
+
+        self.assertEqual(deficits[0].workload_row_code, "W-001")
+        self.assertEqual(deficits[0].required_capacity, 25)
 
 
 if __name__ == "__main__":

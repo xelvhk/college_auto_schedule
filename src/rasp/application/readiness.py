@@ -27,6 +27,16 @@ class ReadinessIssue(BaseModel):
     difference_hours: int | None = None
 
 
+class RoomDeficit(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    workload_row_code: str
+    group_code: str
+    required_room_type: str | None = None
+    required_capacity: int
+    required_equipment_codes: tuple[str, ...] = ()
+
+
 class ReadinessReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -176,3 +186,34 @@ def analyze_curriculum_alignment(
             )
 
     return ReadinessReport(issues=tuple(issues))
+
+
+def analyze_room_supply(imports: ImportBatch) -> tuple[RoomDeficit, ...]:
+    if not imports.rooms:
+        return ()
+
+    deficits: list[RoomDeficit] = []
+    groups = {group.group_code: group for group in imports.groups}
+    for workload in imports.workloads:
+        group = groups.get(workload.group_code)
+        required_capacity = workload.room_capacity or (group.headcount if group else 1)
+        required_equipment = set(workload.required_equipment_codes)
+        matching = [
+            room
+            for room in imports.rooms
+            if room.active
+            and room.capacity >= required_capacity
+            and (workload.room_type is None or room.room_type_code == workload.room_type)
+            and required_equipment.issubset(room.equipment_codes)
+        ]
+        if not matching:
+            deficits.append(
+                RoomDeficit(
+                    workload_row_code=workload.workload_row_code,
+                    group_code=workload.group_code,
+                    required_room_type=workload.room_type,
+                    required_capacity=required_capacity,
+                    required_equipment_codes=workload.required_equipment_codes,
+                )
+            )
+    return tuple(deficits)

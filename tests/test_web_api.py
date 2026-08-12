@@ -61,7 +61,10 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["curricula"], 1)
         self.assertEqual(payload["counts"]["disciplines"], 1)
         self.assertEqual(payload["counts"]["students"], 1)
+        self.assertEqual(payload["counts"]["buildings"], 1)
+        self.assertEqual(payload["counts"]["rooms"], 1)
         self.assertEqual(payload["studentChanges"]["created"], 1)
+        self.assertEqual(payload["roomDeficits"], [])
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 
@@ -83,6 +86,24 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status.json()["activeVersionId"], 1)
         self.assertEqual(status.json()["counts"]["disciplines"], 1)
         self.assertEqual(status.json()["counts"]["students"], 1)
+        self.assertEqual(status.json()["counts"]["rooms"], 1)
+
+    def test_preview_reports_workload_without_matching_room(self) -> None:
+        source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
+        workbook = load_workbook(source)
+        workbook["Аудитории"]["E2"] = 20
+        changed = BytesIO()
+        workbook.save(changed)
+        workbook.close()
+
+        preview = self.client.post(
+            "/api/imports/preview",
+            files={"file": ("rooms.xlsx", changed.getvalue(), XLSX_CONTENT_TYPE)},
+        )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["roomDeficits"][0]["workloadRowCode"], "W-001")
+        self.assertEqual(preview.json()["roomDeficits"][0]["requiredCapacity"], 25)
 
     def test_curriculum_mismatch_does_not_replace_active_version(self) -> None:
         self.upload("/api/imports/activate", "valid-import.xlsx")
