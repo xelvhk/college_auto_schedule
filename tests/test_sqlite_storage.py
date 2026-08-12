@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from rasp.domain.models import Group, ImportBatch, Teacher, WorkloadItem
@@ -108,7 +109,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         reopened.initialize()
 
         self.assertEqual(reopened.get_active_batch(), make_batch())
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute("PRAGMA foreign_keys = ON")
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
         self.assertEqual(foreign_keys, [])
@@ -168,14 +169,14 @@ class SqliteImportRepositoryTests(unittest.TestCase):
 
     def test_rejects_database_from_newer_application_version(self) -> None:
         future_database = Path(self.temporary_directory.name) / "future.sqlite3"
-        with sqlite3.connect(future_database) as connection:
+        with closing(sqlite3.connect(future_database)) as connection, connection:
             connection.execute("PRAGMA user_version = 99")
 
         repository = SqliteImportRepository(future_database)
 
         with self.assertRaises(StorageError):
             repository.initialize()
-        with sqlite3.connect(future_database) as connection:
+        with closing(sqlite3.connect(future_database)) as connection, connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
         self.assertEqual(schema_version, 99)
 
@@ -183,7 +184,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.repository.activate_import(
             make_batch(), source_name="valid.xlsx", source_sha256="4" * 64
         )
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute("UPDATE teachers SET max_hours_per_day = 0")
 
         with self.assertRaisesRegex(StorageError, "invalid stored data"):
