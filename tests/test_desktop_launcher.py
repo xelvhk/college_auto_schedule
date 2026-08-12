@@ -4,6 +4,7 @@ import os
 import socket
 import tempfile
 import unittest
+import ctypes
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -54,11 +55,28 @@ class DesktopLauncherTests(unittest.TestCase):
     def test_windows_process_probe_closes_the_process_handle(self) -> None:
         with patch("ctypes.windll", create=True) as windll:
             windll.kernel32.OpenProcess.return_value = 123
+            windll.kernel32.GetExitCodeProcess.side_effect = (
+                lambda _handle, pointer: setattr(pointer._obj, "value", 259) or True
+            )
 
             running = InstanceLock._process_is_running(42, platform="win32")
 
         self.assertTrue(running)
         windll.kernel32.OpenProcess.assert_called_once_with(0x1000, False, 42)
+        exit_code_pointer = windll.kernel32.GetExitCodeProcess.call_args.args[1]
+        self.assertIsInstance(exit_code_pointer._obj, ctypes.c_ulong)
+        windll.kernel32.CloseHandle.assert_called_once_with(123)
+
+    def test_windows_process_probe_rejects_terminated_process_handle(self) -> None:
+        with patch("ctypes.windll", create=True) as windll:
+            windll.kernel32.OpenProcess.return_value = 123
+            windll.kernel32.GetExitCodeProcess.side_effect = (
+                lambda _handle, pointer: setattr(pointer._obj, "value", 0) or True
+            )
+
+            running = InstanceLock._process_is_running(42, platform="win32")
+
+        self.assertFalse(running)
         windll.kernel32.CloseHandle.assert_called_once_with(123)
 
     def test_main_writes_safe_startup_error_log(self) -> None:

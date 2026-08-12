@@ -54,6 +54,7 @@ class InstanceLock:
             import ctypes
 
             process_query_limited_information = 0x1000
+            still_active = 259
             handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
                 process_query_limited_information,
                 False,
@@ -61,8 +62,15 @@ class InstanceLock:
             )
             if not handle:
                 return False
-            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
-            return True
+            try:
+                exit_code = ctypes.c_ulong()
+                succeeded = ctypes.windll.kernel32.GetExitCodeProcess(  # type: ignore[attr-defined]
+                    handle,
+                    ctypes.byref(exit_code),
+                )
+                return bool(succeeded and exit_code.value == still_active)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
