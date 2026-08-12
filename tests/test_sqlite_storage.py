@@ -6,7 +6,15 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from rasp.domain.models import Group, ImportBatch, Teacher, WorkloadItem
+from rasp.domain.models import (
+    Curriculum,
+    CurriculumDiscipline,
+    Group,
+    ImportBatch,
+    Specialty,
+    Teacher,
+    WorkloadItem,
+)
 from rasp.storage.sqlite import (
     SqliteImportRepository,
     StorageError,
@@ -41,6 +49,50 @@ def make_batch(*, teacher_code: str = "T-001") -> ImportBatch:
     )
 
 
+def make_full_batch() -> ImportBatch:
+    base = make_batch()
+    return base.model_copy(
+        update={
+            "groups": (
+                base.groups[0].model_copy(
+                    update={
+                        "specialty_code": "09.02.07",
+                        "curriculum_code": "UP-09.02.07-2026",
+                    }
+                ),
+            ),
+            "specialties": (
+                Specialty(
+                    specialty_code="09.02.07",
+                    specialty_name="Информационные системы",
+                    program_base="9",
+                    education_form="full_time",
+                ),
+            ),
+            "curricula": (
+                Curriculum(
+                    curriculum_code="UP-09.02.07-2026",
+                    specialty_code="09.02.07",
+                    admission_year=2026,
+                    version="1.0",
+                    valid_from="2026-09-01",
+                    status="active",
+                ),
+            ),
+            "disciplines": (
+                CurriculumDiscipline(
+                    curriculum_code="UP-09.02.07-2026",
+                    discipline_code="MDK.01.01",
+                    discipline_name="Основы программирования",
+                    semester=1,
+                    lesson_type="practice",
+                    planned_hours=72,
+                ),
+            ),
+        }
+    )
+
+
 class SqliteImportRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -63,6 +115,20 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(receipt.version_id, 1)
         self.assertFalse(receipt.reused)
         self.assertEqual(restored, make_batch())
+
+    def test_atomically_activates_and_restores_all_six_sections(self) -> None:
+        receipt = self.repository.activate_import(
+            make_full_batch(),
+            source_name="full-import.xlsx",
+            source_sha256="8" * 64,
+        )
+
+        restored = self.repository.get_active_batch()
+
+        self.assertEqual(receipt.specialty_count, 1)
+        self.assertEqual(receipt.curriculum_count, 1)
+        self.assertEqual(receipt.discipline_count, 1)
+        self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
         batch = make_batch().model_copy(
@@ -237,7 +303,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

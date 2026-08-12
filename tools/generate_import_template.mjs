@@ -42,6 +42,7 @@ const sheets = [
     headers: [
       "group_code",
       "specialty_code",
+      "curriculum_code",
       "course",
       "education_form",
       "headcount",
@@ -53,6 +54,7 @@ const sheets = [
     example: [
       "ИС-101",
       "09.02.07",
+      "UP-09.02.07-2026",
       1,
       "full_time",
       25,
@@ -60,6 +62,69 @@ const sheets = [
       "six_days",
       "MAIN",
       1,
+    ],
+  },
+  {
+    name: "Специальности",
+    headers: [
+      "specialty_code",
+      "specialty_name",
+      "qualification",
+      "program_base",
+      "education_form",
+      "active",
+    ],
+    example: [
+      "09.02.07",
+      "Информационные системы и программирование",
+      "Специалист по информационным системам",
+      "9",
+      "full_time",
+      true,
+    ],
+  },
+  {
+    name: "Учебные планы",
+    headers: [
+      "curriculum_code",
+      "specialty_code",
+      "admission_year",
+      "version",
+      "valid_from",
+      "valid_to",
+      "status",
+    ],
+    example: [
+      "UP-09.02.07-2026",
+      "09.02.07",
+      2026,
+      "1.0",
+      new Date("2026-09-01T00:00:00Z"),
+      null,
+      "active",
+    ],
+  },
+  {
+    name: "Дисциплины",
+    headers: [
+      "curriculum_code",
+      "discipline_code",
+      "discipline_name",
+      "section_code",
+      "semester",
+      "lesson_type",
+      "planned_hours",
+      "control_form",
+    ],
+    example: [
+      "UP-09.02.07-2026",
+      "MDK.01.01",
+      "Основы программирования",
+      "ПМ.01",
+      1,
+      "practice",
+      72,
+      "credit",
     ],
   },
   {
@@ -123,8 +188,14 @@ for (const definition of sheets) {
   };
   sheet.getRange(`A1:${lastColumn}2`).format.autofitColumns();
   sheet.getRange(`A1:${lastColumn}1`).format.rowHeight = 36;
+  sheet.showGridLines = false;
   sheet.freezePanes.freezeRows(1);
 }
+
+workbook.worksheets
+  .getItem("Учебные планы")
+  .getRange("E2:F2")
+  .setNumberFormat("yyyy-mm-dd");
 
 await fs.mkdir(outputDir, { recursive: true });
 await fs.mkdir(fixtureDir, { recursive: true });

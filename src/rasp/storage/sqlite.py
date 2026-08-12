@@ -10,10 +10,18 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from rasp.domain.models import Group, ImportBatch, Teacher, WorkloadItem
+from rasp.domain.models import (
+    Curriculum,
+    CurriculumDiscipline,
+    Group,
+    ImportBatch,
+    Specialty,
+    Teacher,
+    WorkloadItem,
+)
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -60,6 +68,60 @@ CREATE TABLE IF NOT EXISTS student_groups (
     PRIMARY KEY (import_version_id, group_code),
     FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
         ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS specialties (
+    import_version_id INTEGER NOT NULL,
+    specialty_code TEXT NOT NULL,
+    specialty_name TEXT NOT NULL,
+    qualification TEXT,
+    program_base TEXT NOT NULL,
+    education_form TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, specialty_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS curricula (
+    import_version_id INTEGER NOT NULL,
+    curriculum_code TEXT NOT NULL,
+    specialty_code TEXT NOT NULL,
+    admission_year INTEGER NOT NULL,
+    version TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,
+    status TEXT NOT NULL,
+    PRIMARY KEY (import_version_id, curriculum_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (import_version_id, specialty_code)
+        REFERENCES specialties(import_version_id, specialty_code)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE IF NOT EXISTS curriculum_disciplines (
+    import_version_id INTEGER NOT NULL,
+    curriculum_code TEXT NOT NULL,
+    discipline_code TEXT NOT NULL,
+    discipline_name TEXT NOT NULL,
+    section_code TEXT,
+    semester INTEGER NOT NULL,
+    lesson_type TEXT NOT NULL,
+    planned_hours INTEGER NOT NULL,
+    control_form TEXT,
+    PRIMARY KEY (
+        import_version_id,
+        curriculum_code,
+        discipline_code,
+        semester,
+        lesson_type
+    ),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (import_version_id, curriculum_code)
+        REFERENCES curricula(import_version_id, curriculum_code)
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS workload_items (
@@ -109,6 +171,9 @@ class ImportReceipt:
     teacher_count: int
     group_count: int
     workload_count: int
+    specialty_count: int
+    curriculum_count: int
+    discipline_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,9 +254,7 @@ class SqliteImportRepository:
                     version_id = int(existing["version_id"])
                     created_at = str(existing["created_at"])
                     reused = True
-                    teacher_count, group_count, workload_count = self._version_counts(
-                        connection, version_id
-                    )
+                    counts = self._version_counts(connection, version_id)
                 else:
                     cursor = connection.execute(
                         """
@@ -207,6 +270,19 @@ class SqliteImportRepository:
                     teacher_count = len(batch.teachers)
                     group_count = len(batch.groups)
                     workload_count = len(batch.workloads)
+                    specialty_count = len(batch.specialties)
+                    curriculum_count = len(batch.curricula)
+                    discipline_count = len(batch.disciplines)
+
+                if existing is not None:
+                    (
+                        teacher_count,
+                        group_count,
+                        workload_count,
+                        specialty_count,
+                        curriculum_count,
+                        discipline_count,
+                    ) = counts
 
                 connection.execute(
                     "UPDATE import_versions SET is_active = 0 WHERE is_active = 1"
@@ -226,12 +302,15 @@ class SqliteImportRepository:
             teacher_count=teacher_count,
             group_count=group_count,
             workload_count=workload_count,
+            specialty_count=specialty_count,
+            curriculum_count=curriculum_count,
+            discipline_count=discipline_count,
         )
 
     @staticmethod
     def _version_counts(
         connection: sqlite3.Connection, version_id: int
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int, int, int, int, int]:
         teachers = connection.execute(
             "SELECT COUNT(*) FROM teachers WHERE import_version_id = ?",
             (version_id,),
@@ -244,7 +323,26 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM workload_items WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
-        return int(teachers), int(groups), int(workloads)
+        specialties = connection.execute(
+            "SELECT COUNT(*) FROM specialties WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        curricula = connection.execute(
+            "SELECT COUNT(*) FROM curricula WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        disciplines = connection.execute(
+            "SELECT COUNT(*) FROM curriculum_disciplines WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        return (
+            int(teachers),
+            int(groups),
+            int(workloads),
+            int(specialties),
+            int(curricula),
+            int(disciplines),
+        )
 
     def _insert_batch(
         self,
@@ -252,6 +350,62 @@ class SqliteImportRepository:
         version_id: int,
         batch: ImportBatch,
     ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO specialties VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    version_id,
+                    item.specialty_code,
+                    item.specialty_name,
+                    item.qualification,
+                    item.program_base.value,
+                    item.education_form.value,
+                    int(item.active),
+                )
+                for item in batch.specialties
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO curricula VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    version_id,
+                    item.curriculum_code,
+                    item.specialty_code,
+                    item.admission_year,
+                    item.version,
+                    item.valid_from.isoformat(),
+                    item.valid_to.isoformat() if item.valid_to else None,
+                    item.status.value,
+                )
+                for item in batch.curricula
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO curriculum_disciplines VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            [
+                (
+                    version_id,
+                    item.curriculum_code,
+                    item.discipline_code,
+                    item.discipline_name,
+                    item.section_code,
+                    item.semester,
+                    item.lesson_type.value,
+                    item.planned_hours,
+                    item.control_form,
+                )
+                for item in batch.disciplines
+            ],
+        )
         connection.executemany(
             """
             INSERT INTO teachers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -420,6 +574,28 @@ class SqliteImportRepository:
                     """,
                     (version_id,),
                 ).fetchall()
+                specialty_rows = connection.execute(
+                    """
+                    SELECT * FROM specialties
+                    WHERE import_version_id = ? ORDER BY specialty_code
+                    """,
+                    (version_id,),
+                ).fetchall()
+                curriculum_rows = connection.execute(
+                    """
+                    SELECT * FROM curricula
+                    WHERE import_version_id = ? ORDER BY curriculum_code
+                    """,
+                    (version_id,),
+                ).fetchall()
+                discipline_rows = connection.execute(
+                    """
+                    SELECT * FROM curriculum_disciplines
+                    WHERE import_version_id = ?
+                    ORDER BY curriculum_code, discipline_code, semester, lesson_type
+                    """,
+                    (version_id,),
+                ).fetchall()
         except sqlite3.Error as error:
             raise StorageError("Unable to read active import") from error
 
@@ -429,6 +605,15 @@ class SqliteImportRepository:
                 groups=tuple(self._group_from_row(row) for row in group_rows),
                 workloads=tuple(
                     self._workload_from_row(row) for row in workload_rows
+                ),
+                specialties=tuple(
+                    self._specialty_from_row(row) for row in specialty_rows
+                ),
+                curricula=tuple(
+                    self._curriculum_from_row(row) for row in curriculum_rows
+                ),
+                disciplines=tuple(
+                    self._discipline_from_row(row) for row in discipline_rows
                 ),
             )
         except ValidationError as error:
@@ -483,4 +668,40 @@ class SqliteImportRepository:
             lesson_bundle_code=row["lesson_bundle_code"],
             room_type=row["room_type"],
             room_capacity=row["room_capacity"],
+        )
+
+    @staticmethod
+    def _specialty_from_row(row: sqlite3.Row) -> Specialty:
+        return Specialty(
+            specialty_code=row["specialty_code"],
+            specialty_name=row["specialty_name"],
+            qualification=row["qualification"],
+            program_base=row["program_base"],
+            education_form=row["education_form"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _curriculum_from_row(row: sqlite3.Row) -> Curriculum:
+        return Curriculum(
+            curriculum_code=row["curriculum_code"],
+            specialty_code=row["specialty_code"],
+            admission_year=row["admission_year"],
+            version=row["version"],
+            valid_from=row["valid_from"],
+            valid_to=row["valid_to"],
+            status=row["status"],
+        )
+
+    @staticmethod
+    def _discipline_from_row(row: sqlite3.Row) -> CurriculumDiscipline:
+        return CurriculumDiscipline(
+            curriculum_code=row["curriculum_code"],
+            discipline_code=row["discipline_code"],
+            discipline_name=row["discipline_name"],
+            section_code=row["section_code"],
+            semester=row["semester"],
+            lesson_type=row["lesson_type"],
+            planned_hours=row["planned_hours"],
+            control_form=row["control_form"],
         )

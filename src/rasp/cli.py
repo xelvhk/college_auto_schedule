@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 from typing import Sequence
 
-from rasp.application.imports import validate_and_activate_workbook
+from rasp.application.imports import (
+    validate_and_activate_workbook,
+    validate_curriculum_readiness,
+)
 from rasp.imports.excel import ImportValidationError, read_import_workbook
 from rasp.storage.sqlite import (
     SqliteImportRepository,
@@ -64,6 +67,7 @@ def _print_validation_error(error: ImportValidationError) -> None:
 def _validate(file_path: Path) -> int:
     try:
         batch = read_import_workbook(file_path)
+        validate_curriculum_readiness(batch)
     except ImportValidationError as error:
         _print_validation_error(error)
         return 2
@@ -74,6 +78,9 @@ def _validate(file_path: Path) -> int:
                 "teachers": len(batch.teachers),
                 "groups": len(batch.groups),
                 "workloads": len(batch.workloads),
+                "specialties": len(batch.specialties),
+                "curricula": len(batch.curricula),
+                "disciplines": len(batch.disciplines),
             },
         }
     )
@@ -106,6 +113,9 @@ def _activate(file_path: Path, database_path: Path) -> int:
                 "teachers": receipt.teacher_count,
                 "groups": receipt.group_count,
                 "workloads": receipt.workload_count,
+                "specialties": receipt.specialty_count,
+                "curricula": receipt.curriculum_count,
+                "disciplines": receipt.discipline_count,
             },
         }
     )
@@ -135,6 +145,9 @@ def _status(database_path: Path) -> int:
                 "teachers": len(batch.teachers) if batch else 0,
                 "groups": len(batch.groups) if batch else 0,
                 "workloads": len(batch.workloads) if batch else 0,
+                "specialties": len(batch.specialties) if batch else 0,
+                "curricula": len(batch.curricula) if batch else 0,
+                "disciplines": len(batch.disciplines) if batch else 0,
             },
             "versions": [
                 {

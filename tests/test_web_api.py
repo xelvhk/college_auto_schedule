@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from io import BytesIO
 import tempfile
 import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from rasp.web.app import create_app
 
@@ -55,6 +57,9 @@ class WebApiTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["valid"])
         self.assertEqual(payload["counts"]["teachers"], 1)
+        self.assertEqual(payload["counts"]["specialties"], 1)
+        self.assertEqual(payload["counts"]["curricula"], 1)
+        self.assertEqual(payload["counts"]["disciplines"], 1)
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 
@@ -74,6 +79,30 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(activated.json()["versionId"], 1)
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["activeVersionId"], 1)
+        self.assertEqual(status.json()["counts"]["disciplines"], 1)
+
+    def test_curriculum_mismatch_does_not_replace_active_version(self) -> None:
+        self.upload("/api/imports/activate", "valid-import.xlsx")
+        source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
+        workbook = load_workbook(source)
+        workbook["Нагрузка"]["D2"] = "UNKNOWN"
+        changed = BytesIO()
+        workbook.save(changed)
+        workbook.close()
+
+        rejected = self.client.post(
+            "/api/imports/activate",
+            files={"file": ("invalid-plan.xlsx", changed.getvalue(), XLSX_CONTENT_TYPE)},
+        )
+        status = self.client.get("/api/status")
+
+        self.assertEqual(rejected.status_code, 422)
+        self.assertEqual(
+            rejected.json()["issues"][0]["code"],
+            "discipline_not_in_curriculum",
+        )
+        self.assertEqual(status.json()["activeVersionId"], 1)
+        self.assertEqual(len(status.json()["versions"]), 1)
 
     def test_saved_version_can_be_reactivated_and_unknown_version_is_404(self) -> None:
         self.upload("/api/imports/activate", "valid-import.xlsx")

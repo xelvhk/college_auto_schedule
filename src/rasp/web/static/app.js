@@ -16,6 +16,9 @@ const elements = {
   teacherCount: document.querySelector("#teacher-count"),
   groupCount: document.querySelector("#group-count"),
   workloadCount: document.querySelector("#workload-count"),
+  specialtyCount: document.querySelector("#specialty-count"),
+  curriculumCount: document.querySelector("#curriculum-count"),
+  disciplineCount: document.querySelector("#discipline-count"),
   teacherPreview: document.querySelector("#teacher-preview"),
   systemState: document.querySelector("#system-state"),
   activeSummary: document.querySelector("#active-summary"),
@@ -139,13 +142,28 @@ async function previewFile() {
     elements.teacherCount.textContent = payload.counts.teachers;
     elements.groupCount.textContent = payload.counts.groups;
     elements.workloadCount.textContent = payload.counts.workloads;
+    elements.specialtyCount.textContent = payload.counts.specialties;
+    elements.curriculumCount.textContent = payload.counts.curricula;
+    elements.disciplineCount.textContent = payload.counts.disciplines;
     renderTeacherRows(payload.samples.teachers);
     elements.preview.hidden = false;
     elements.activateButton.disabled = false;
     elements.stepFile.className = "is-complete";
     elements.stepCheck.className = "is-current";
     elements.preview.scrollIntoView({ behavior: "smooth", block: "start" });
-    elements.liveRegion.textContent = "Файл проверен. Можно активировать новую версию.";
+    if (payload.warnings.length) {
+      setMessage(
+        "warning",
+        `Файл проверен: предупреждений ${payload.warnings.length}`,
+        payload.warnings.map((warning) => ({
+          section: warning.groupCode || "учебный план",
+          row: 0,
+          message: `${warning.message}${warning.differenceHours ? ` (${warning.differenceHours} ч.)` : ""}`,
+        })),
+      );
+    } else {
+      elements.liveRegion.textContent = "Файл проверен. Можно активировать новую версию.";
+    }
   } catch (error) {
     state.previewValid = false;
     elements.activateButton.disabled = true;
@@ -192,7 +210,7 @@ function renderStatus(payload) {
     const value = document.createElement("strong");
     value.textContent = `№${payload.activeVersionId}`;
     const counts = document.createElement("small");
-    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп`;
+    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.disciplines} дисциплин`;
     elements.activeSummary.append(label, value, counts);
   }
 

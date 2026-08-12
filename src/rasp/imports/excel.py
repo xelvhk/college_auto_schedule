@@ -10,7 +10,17 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, ValidationError
 
-from rasp.domain.models import Group, ImportBatch, Teacher, WorkloadItem
+from rasp.domain.models import (
+    Group,
+    ImportBatch,
+    ReferenceDataBatch,
+    Teacher,
+    WorkloadItem,
+)
+from rasp.imports.reference_data import (
+    ReferenceDataValidationError,
+    build_reference_data_batch,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,11 +46,17 @@ MAX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 100
 MAX_DATA_ROWS_PER_SHEET = 100_000
 
-SHEETS = {
+CORE_SHEETS = {
     "Преподаватели": "teachers",
     "Группы": "groups",
     "Нагрузка": "workloads",
 }
+REFERENCE_SHEETS = {
+    "Специальности": "specialties",
+    "Учебные планы": "curricula",
+    "Дисциплины": "disciplines",
+}
+SHEETS = CORE_SHEETS | REFERENCE_SHEETS
 REQUIRED_HEADERS = {
     "Преподаватели": {"teacher_code", "full_name", "yearly_assigned_hours"},
     "Группы": {"group_code", "course", "headcount"},
@@ -55,6 +71,28 @@ REQUIRED_HEADERS = {
         "lesson_type",
         "total_academic_hours",
         "event_duration_hours",
+    },
+    "Специальности": {
+        "specialty_code",
+        "specialty_name",
+        "program_base",
+        "education_form",
+    },
+    "Учебные планы": {
+        "curriculum_code",
+        "specialty_code",
+        "admission_year",
+        "version",
+        "valid_from",
+        "status",
+    },
+    "Дисциплины": {
+        "curriculum_code",
+        "discipline_code",
+        "discipline_name",
+        "semester",
+        "lesson_type",
+        "planned_hours",
     },
 }
 
@@ -114,6 +152,9 @@ def build_import_batch(
     teacher_rows: Iterable[Mapping[str, Any]],
     group_rows: Iterable[Mapping[str, Any]],
     workload_rows: Iterable[Mapping[str, Any]],
+    specialty_rows: Iterable[Mapping[str, Any]] | None = None,
+    curriculum_rows: Iterable[Mapping[str, Any]] | None = None,
+    discipline_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -155,13 +196,52 @@ def build_import_batch(
                 )
             )
 
-    if issues:
-        raise ImportValidationError(issues)
+    references = ReferenceDataBatch(specialties=(), curricula=(), disciplines=())
+    reference_inputs = (specialty_rows, curriculum_rows, discipline_rows)
+    if any(rows is not None for rows in reference_inputs):
+        if not all(rows is not None for rows in reference_inputs):
+            issues.append(
+                ImportIssue(
+                    section="file",
+                    row=0,
+                    column=None,
+                    code="incomplete_reference_data",
+                    message="All curriculum reference sections must be provided together",
+                )
+            )
+        else:
+            try:
+                references = build_reference_data_batch(
+                    specialty_rows=specialty_rows or (),
+                    curriculum_rows=curriculum_rows or (),
+                    discipline_rows=discipline_rows or (),
+                )
+            except ReferenceDataValidationError as error:
+                issues.extend(
+                    ImportIssue(
+                        section=issue.section,
+                        row=issue.row,
+                        column=issue.column,
+                        code=issue.code,
+                        message=issue.message,
+                    )
+                    for issue in error.issues
+                )
 
-    return ImportBatch(
+    operational_batch = ImportBatch(
         teachers=tuple(teachers),
         groups=tuple(groups),
         workloads=tuple(workloads),
+    )
+    if issues:
+        raise ImportValidationError(issues)
+
+    return operational_batch.model_copy(
+        update={
+            "specialties": references.specialties,
+            "curricula": references.curricula,
+            "disciplines": references.disciplines,
+        }
     )
 
 
@@ -382,7 +462,13 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         ) from error
 
     try:
-        missing_sheets = set(SHEETS) - set(workbook.sheetnames)
+        available_sheets = set(workbook.sheetnames)
+        missing_sheets = set(CORE_SHEETS) - available_sheets
+        reference_sheets_present = set(REFERENCE_SHEETS) & available_sheets
+        if reference_sheets_present and reference_sheets_present != set(
+            REFERENCE_SHEETS
+        ):
+            missing_sheets |= set(REFERENCE_SHEETS) - available_sheets
         if missing_sheets:
             raise ImportValidationError(
                 [
@@ -398,7 +484,10 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
 
         rows: dict[str, list[dict[str, Any]]] = {}
         sheet_issues: list[ImportIssue] = []
-        for sheet_name, section in SHEETS.items():
+        selected_sheets = dict(CORE_SHEETS)
+        if reference_sheets_present:
+            selected_sheets.update(REFERENCE_SHEETS)
+        for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
             except ImportValidationError as error:
@@ -410,6 +499,9 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             teacher_rows=rows["teachers"],
             group_rows=rows["groups"],
             workload_rows=rows["workloads"],
+            specialty_rows=rows.get("specialties"),
+            curriculum_rows=rows.get("curricula"),
+            discipline_rows=rows.get("disciplines"),
         )
     finally:
         workbook.close()

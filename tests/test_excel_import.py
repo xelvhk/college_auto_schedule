@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
+from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
 
 from rasp.domain.models import Group, Teacher, WorkloadItem
@@ -115,12 +118,115 @@ class ImportBatchTests(unittest.TestCase):
 
 
 class WorkbookImportTests(unittest.TestCase):
-    def test_reads_valid_three_sheet_workbook(self) -> None:
+    def test_rejects_partial_reference_sheet_set(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx")
+        del workbook["Дисциплины"]
+
+        with NamedTemporaryFile(suffix=".xlsx") as target:
+            workbook.save(target.name)
+            workbook.close()
+            with self.assertRaises(ImportValidationError) as raised:
+                read_import_workbook(target.name)
+
+        self.assertEqual(raised.exception.issues[0].code, "missing_sheet")
+        self.assertIn("Дисциплины", raised.exception.issues[0].message)
+
+    def test_reads_reference_sheets_into_the_same_batch(self) -> None:
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        sheets = {
+            "Преподаватели": (
+                ["teacher_code", "full_name", "yearly_assigned_hours"],
+                [["T-001", "Иванова Ирина Игоревна", 72]],
+            ),
+            "Группы": (
+                [
+                    "group_code",
+                    "specialty_code",
+                    "curriculum_code",
+                    "course",
+                    "headcount",
+                ],
+                [["ИС-101", "09.02.07", "UP-09.02.07-2026", 1, 25]],
+            ),
+            "Нагрузка": (
+                [
+                    "workload_row_code",
+                    "academic_year",
+                    "semester",
+                    "discipline_code",
+                    "discipline_name",
+                    "group_code",
+                    "teacher_code",
+                    "lesson_type",
+                    "total_academic_hours",
+                    "event_duration_hours",
+                ],
+                [[
+                    "W-001", "2026/2027", 1, "MDK.01.01",
+                    "Основы программирования", "ИС-101", "T-001",
+                    "practice", 72, 2,
+                ]],
+            ),
+            "Специальности": (
+                [
+                    "specialty_code",
+                    "specialty_name",
+                    "program_base",
+                    "education_form",
+                ],
+                [["09.02.07", "Информационные системы", "9", "full_time"]],
+            ),
+            "Учебные планы": (
+                [
+                    "curriculum_code",
+                    "specialty_code",
+                    "admission_year",
+                    "version",
+                    "valid_from",
+                    "status",
+                ],
+                [[
+                    "UP-09.02.07-2026", "09.02.07", 2026, "1.0",
+                    date(2026, 9, 1), "active",
+                ]],
+            ),
+            "Дисциплины": (
+                [
+                    "curriculum_code",
+                    "discipline_code",
+                    "discipline_name",
+                    "semester",
+                    "lesson_type",
+                    "planned_hours",
+                ],
+                [[
+                    "UP-09.02.07-2026", "MDK.01.01",
+                    "Основы программирования", 1, "practice", 72,
+                ]],
+            ),
+        }
+        for title, (headers, rows) in sheets.items():
+            worksheet = workbook.create_sheet(title)
+            worksheet.append(headers)
+            for row in rows:
+                worksheet.append(row)
+
+        with NamedTemporaryFile(suffix=".xlsx") as target:
+            workbook.save(target.name)
+            batch = read_import_workbook(target.name)
+
+        self.assertEqual(batch.specialties[0].specialty_code, "09.02.07")
+        self.assertEqual(batch.curricula[0].curriculum_code, "UP-09.02.07-2026")
+        self.assertEqual(batch.disciplines[0].planned_hours, 72)
+
+    def test_reads_valid_canonical_workbook(self) -> None:
         batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
 
         self.assertEqual(batch.teachers[0].teacher_code, "T-001")
         self.assertEqual(batch.groups[0].group_code, "ИС-101")
         self.assertEqual(batch.workloads[0].workload_row_code, "W-001")
+        self.assertEqual(batch.specialties[0].specialty_code, "09.02.07")
 
     def test_rejects_non_xlsx_file_before_parsing(self) -> None:
         with self.assertRaises(ImportValidationError) as raised:

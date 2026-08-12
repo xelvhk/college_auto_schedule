@@ -12,7 +12,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from rasp.application.imports import validate_and_activate_workbook
+from rasp.application.imports import (
+    validate_and_activate_workbook,
+    validate_curriculum_readiness,
+)
+from rasp.application.readiness import ReadinessSeverity
+from rasp.domain.models import ImportBatch
 from rasp.imports.excel import (
     MAX_FILE_SIZE,
     ImportValidationError,
@@ -36,6 +41,35 @@ class ApiError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+def _counts(batch: ImportBatch | None) -> dict[str, int]:
+    return {
+        "teachers": len(batch.teachers) if batch else 0,
+        "groups": len(batch.groups) if batch else 0,
+        "workloads": len(batch.workloads) if batch else 0,
+        "specialties": len(batch.specialties) if batch else 0,
+        "curricula": len(batch.curricula) if batch else 0,
+        "disciplines": len(batch.disciplines) if batch else 0,
+    }
+
+
+def _readiness_warnings(batch: ImportBatch) -> list[dict[str, object]]:
+    if not batch.curricula:
+        return []
+    report = validate_curriculum_readiness(batch)
+    return [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "groupCode": issue.group_code,
+            "curriculumCode": issue.curriculum_code,
+            "disciplineCode": issue.discipline_code,
+            "differenceHours": issue.difference_hours,
+        }
+        for issue in report.issues
+        if issue.severity is ReadinessSeverity.WARNING
+    ]
 
 
 def _issues_payload(error: ImportValidationError) -> dict[str, object]:
@@ -86,11 +120,7 @@ def _status_payload(repository: SqliteImportRepository) -> dict[str, object]:
     active = next((version for version in versions if version.is_active), None)
     return {
         "activeVersionId": active.version_id if active else None,
-        "counts": {
-            "teachers": len(batch.teachers) if batch else 0,
-            "groups": len(batch.groups) if batch else 0,
-            "workloads": len(batch.workloads) if batch else 0,
-        },
+        "counts": _counts(batch),
         "versions": [
             {
                 "versionId": version.version_id,
@@ -170,17 +200,15 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         async with _staged_upload(file) as staged_path:
             try:
                 batch = read_import_workbook(staged_path)
+                validate_curriculum_readiness(batch)
             except ImportValidationError as error:
                 return JSONResponse(status_code=422, content=_issues_payload(error))
         return JSONResponse(
             {
                 "valid": True,
                 "fileName": Path(file.filename or "import.xlsx").name,
-                "counts": {
-                    "teachers": len(batch.teachers),
-                    "groups": len(batch.groups),
-                    "workloads": len(batch.workloads),
-                },
+                "counts": _counts(batch),
+                "warnings": _readiness_warnings(batch),
                 "samples": {
                     "teachers": [
                         {
@@ -207,6 +235,29 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                         }
                         for item in batch.workloads[:5]
                     ],
+                    "specialties": [
+                        {
+                            "specialtyCode": item.specialty_code,
+                            "specialtyName": item.specialty_name,
+                        }
+                        for item in batch.specialties[:5]
+                    ],
+                    "curricula": [
+                        {
+                            "curriculumCode": item.curriculum_code,
+                            "specialtyCode": item.specialty_code,
+                            "version": item.version,
+                        }
+                        for item in batch.curricula[:5]
+                    ],
+                    "disciplines": [
+                        {
+                            "disciplineCode": item.discipline_code,
+                            "disciplineName": item.discipline_name,
+                            "plannedHours": item.planned_hours,
+                        }
+                        for item in batch.disciplines[:5]
+                    ],
                 },
             }
         )
@@ -231,6 +282,9 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "teachers": receipt.teacher_count,
                     "groups": receipt.group_count,
                     "workloads": receipt.workload_count,
+                    "specialties": receipt.specialty_count,
+                    "curricula": receipt.curriculum_count,
+                    "disciplines": receipt.discipline_count,
                 },
             },
         )
@@ -263,4 +317,3 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
 
 
 app = create_app()
-

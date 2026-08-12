@@ -219,6 +219,9 @@ class ImportBatch(DomainModel):
     teachers: tuple[Teacher, ...]
     groups: tuple[Group, ...]
     workloads: tuple[WorkloadItem, ...]
+    specialties: tuple[Specialty, ...] = ()
+    curricula: tuple[Curriculum, ...] = ()
+    disciplines: tuple[CurriculumDiscipline, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):
