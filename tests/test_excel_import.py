@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import TemporaryDirectory
 
 from openpyxl import Workbook, load_workbook
 from pydantic import ValidationError
@@ -122,11 +122,12 @@ class WorkbookImportTests(unittest.TestCase):
         workbook = load_workbook(FIXTURES / "valid-import.xlsx")
         del workbook["Дисциплины"]
 
-        with NamedTemporaryFile(suffix=".xlsx") as target:
-            workbook.save(target.name)
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "partial.xlsx"
+            workbook.save(target)
             workbook.close()
             with self.assertRaises(ImportValidationError) as raised:
-                read_import_workbook(target.name)
+                read_import_workbook(target)
 
         self.assertEqual(raised.exception.issues[0].code, "missing_sheet")
         self.assertIn("Дисциплины", raised.exception.issues[0].message)
@@ -212,9 +213,11 @@ class WorkbookImportTests(unittest.TestCase):
             for row in rows:
                 worksheet.append(row)
 
-        with NamedTemporaryFile(suffix=".xlsx") as target:
-            workbook.save(target.name)
-            batch = read_import_workbook(target.name)
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "full.xlsx"
+            workbook.save(target)
+            workbook.close()
+            batch = read_import_workbook(target)
 
         self.assertEqual(batch.specialties[0].specialty_code, "09.02.07")
         self.assertEqual(batch.curricula[0].curriculum_code, "UP-09.02.07-2026")
