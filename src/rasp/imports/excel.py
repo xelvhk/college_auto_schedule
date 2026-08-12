@@ -68,6 +68,112 @@ ROOM_SHEETS = {
     "Оборудование": "equipment",
     "Аудитории": "rooms",
 }
+RUSSIAN_HEADERS = {
+    "Преподаватели": {
+        "teacher_code": "Код преподавателя",
+        "full_name": "ФИО",
+        "department": "Подразделение",
+        "employment_type": "Тип занятости",
+        "yearly_assigned_hours": "Назначено часов в год",
+        "yearly_limit_hours": "Лимит часов в год",
+        "max_hours_per_day": "Макс. часов в день",
+        "max_days_per_week": "Макс. дней в неделю",
+        "home_building_code": "Основной корпус",
+        "active": "Активен",
+    },
+    "Группы": {
+        "group_code": "Код группы",
+        "specialty_code": "Код специальности",
+        "curriculum_code": "Код учебного плана",
+        "course": "Курс",
+        "education_form": "Форма обучения",
+        "headcount": "Численность",
+        "program_base": "База обучения",
+        "study_week_type": "Тип учебной недели",
+        "primary_building_code": "Основной корпус",
+        "subgroup_count": "Количество подгрупп",
+    },
+    "Специальности": {
+        "specialty_code": "Код специальности",
+        "specialty_name": "Название специальности",
+        "qualification": "Квалификация",
+        "program_base": "База обучения",
+        "education_form": "Форма обучения",
+        "active": "Активна",
+    },
+    "Учебные планы": {
+        "curriculum_code": "Код учебного плана",
+        "specialty_code": "Код специальности",
+        "admission_year": "Год набора",
+        "version": "Версия",
+        "valid_from": "Действует с",
+        "valid_to": "Действует по",
+        "status": "Статус",
+    },
+    "Дисциплины": {
+        "curriculum_code": "Код учебного плана",
+        "discipline_code": "Код дисциплины",
+        "discipline_name": "Название дисциплины",
+        "section_code": "Код раздела",
+        "semester": "Семестр",
+        "lesson_type": "Вид занятия",
+        "planned_hours": "Плановые часы",
+        "control_form": "Форма контроля",
+    },
+    "Студенты": {
+        "student_code": "Код студента",
+        "full_name": "ФИО",
+        "group_code": "Код группы",
+        "status": "Статус",
+        "enrollment_date": "Дата зачисления",
+        "end_date": "Дата окончания",
+        "subgroup_codes": "Номера подгрупп",
+        "elective_codes": "Коды элективов",
+    },
+    "Корпуса": {
+        "building_code": "Код корпуса",
+        "building_name": "Название корпуса",
+        "active": "Активен",
+    },
+    "Типы помещений": {
+        "room_type_code": "Код типа помещения",
+        "room_type_name": "Название типа помещения",
+        "active": "Активен",
+    },
+    "Оборудование": {
+        "equipment_code": "Код оборудования",
+        "equipment_name": "Название оборудования",
+        "active": "Активно",
+    },
+    "Аудитории": {
+        "room_code": "Код аудитории",
+        "room_name": "Название аудитории",
+        "building_code": "Код корпуса",
+        "room_type_code": "Код типа помещения",
+        "capacity": "Вместимость",
+        "equipment_codes": "Коды оборудования",
+        "active": "Активна",
+    },
+    "Нагрузка": {
+        "workload_row_code": "Код строки нагрузки",
+        "academic_year": "Учебный год",
+        "semester": "Семестр",
+        "discipline_code": "Код дисциплины",
+        "discipline_name": "Название дисциплины",
+        "group_code": "Код группы",
+        "subgroup": "Подгруппа",
+        "stream": "Поток",
+        "teacher_code": "Код преподавателя",
+        "lesson_type": "Вид занятия",
+        "total_academic_hours": "Всего академических часов",
+        "event_duration_hours": "Продолжительность занятия",
+        "recurrence": "Периодичность",
+        "lesson_bundle_code": "Код связки занятий",
+        "room_type": "Тип помещения",
+        "room_capacity": "Требуемая вместимость",
+        "required_equipment_codes": "Требуемое оборудование",
+    },
+}
 FORBIDDEN_STUDENT_HEADERS = {
     "address",
     "attendance",
@@ -585,6 +691,11 @@ def _read_sheet_rows(worksheet: Any) -> list[dict[str, Any]]:
                 "Header cells must be non-empty",
             )
         )
+    aliases = {
+        russian.casefold(): canonical
+        for canonical, russian in RUSSIAN_HEADERS[worksheet.title].items()
+    }
+    headers = [aliases.get(header.casefold(), header) for header in headers]
     duplicate_headers = {header for header in headers if headers.count(header) > 1}
     if duplicate_headers:
         issues.append(

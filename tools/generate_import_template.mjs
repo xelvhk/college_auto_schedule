@@ -9,6 +9,69 @@ const outputDir = new URL(
 const fixtureDir = new URL("../tests/fixtures/", import.meta.url);
 
 const workbook = Workbook.create();
+const russianHeaders = {
+  teacher_code: "Код преподавателя",
+  full_name: "ФИО",
+  department: "Подразделение",
+  employment_type: "Тип занятости",
+  yearly_assigned_hours: "Назначено часов в год",
+  yearly_limit_hours: "Лимит часов в год",
+  max_hours_per_day: "Макс. часов в день",
+  max_days_per_week: "Макс. дней в неделю",
+  home_building_code: "Основной корпус",
+  active: "Активен",
+  group_code: "Код группы",
+  specialty_code: "Код специальности",
+  curriculum_code: "Код учебного плана",
+  course: "Курс",
+  education_form: "Форма обучения",
+  headcount: "Численность",
+  program_base: "База обучения",
+  study_week_type: "Тип учебной недели",
+  primary_building_code: "Основной корпус",
+  subgroup_count: "Количество подгрупп",
+  specialty_name: "Название специальности",
+  qualification: "Квалификация",
+  admission_year: "Год набора",
+  version: "Версия",
+  valid_from: "Действует с",
+  valid_to: "Действует по",
+  status: "Статус",
+  discipline_code: "Код дисциплины",
+  discipline_name: "Название дисциплины",
+  section_code: "Код раздела",
+  semester: "Семестр",
+  lesson_type: "Вид занятия",
+  planned_hours: "Плановые часы",
+  control_form: "Форма контроля",
+  student_code: "Код студента",
+  enrollment_date: "Дата зачисления",
+  end_date: "Дата окончания",
+  subgroup_codes: "Номера подгрупп",
+  elective_codes: "Коды элективов",
+  building_code: "Код корпуса",
+  building_name: "Название корпуса",
+  room_type_code: "Код типа помещения",
+  room_type_name: "Название типа помещения",
+  equipment_code: "Код оборудования",
+  equipment_name: "Название оборудования",
+  room_code: "Код аудитории",
+  room_name: "Название аудитории",
+  capacity: "Вместимость",
+  equipment_codes: "Коды оборудования",
+  workload_row_code: "Код строки нагрузки",
+  academic_year: "Учебный год",
+  subgroup: "Подгруппа",
+  stream: "Поток",
+  teacher_code: "Код преподавателя",
+  total_academic_hours: "Всего академических часов",
+  event_duration_hours: "Продолжительность занятия",
+  recurrence: "Периодичность",
+  lesson_bundle_code: "Код связки занятий",
+  room_type: "Тип помещения",
+  room_capacity: "Требуемая вместимость",
+  required_equipment_codes: "Требуемое оборудование",
+};
 const sheets = [
   {
     name: "Преподаватели",
@@ -229,11 +292,18 @@ const sheets = [
   },
 ];
 
+function localizedHeader(sheetName, header) {
+  if (header !== "active") return russianHeaders[header];
+  if (sheetName === "Специальности" || sheetName === "Аудитории") return "Активна";
+  if (sheetName === "Оборудование") return "Активно";
+  return "Активен";
+}
+
 for (const definition of sheets) {
   const sheet = workbook.worksheets.add(definition.name);
   const lastColumn = String.fromCharCode(64 + definition.headers.length);
   sheet.getRange(`A1:${lastColumn}2`).values = [
-    definition.headers,
+    definition.headers.map((header) => localizedHeader(definition.name, header)),
     definition.example,
   ];
   sheet.getRange(`A1:${lastColumn}1`).format = {

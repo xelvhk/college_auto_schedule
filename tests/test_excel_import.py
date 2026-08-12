@@ -19,6 +19,7 @@ from rasp.domain.models import (
     WorkloadItem,
 )
 from rasp.imports.excel import (
+    RUSSIAN_HEADERS,
     ImportValidationError,
     build_import_batch,
     read_import_workbook,
@@ -234,6 +235,36 @@ class ImportBatchTests(unittest.TestCase):
 
 
 class WorkbookImportTests(unittest.TestCase):
+    def test_canonical_workbook_uses_russian_headers(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx", read_only=True)
+        try:
+            self.assertEqual(workbook["Преподаватели"]["A1"].value, "Код преподавателя")
+            self.assertEqual(workbook["Студенты"]["B1"].value, "ФИО")
+            self.assertEqual(workbook["Аудитории"]["E1"].value, "Вместимость")
+            self.assertEqual(
+                workbook["Нагрузка"]["Q1"].value,
+                "Требуемое оборудование",
+            )
+        finally:
+            workbook.close()
+
+    def test_legacy_english_headers_remain_supported(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx")
+        for sheet_name, aliases in RUSSIAN_HEADERS.items():
+            legacy_headers = {russian: canonical for canonical, russian in aliases.items()}
+            for cell in workbook[sheet_name][1]:
+                if cell.value in legacy_headers:
+                    cell.value = legacy_headers[cell.value]
+
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "legacy-headers.xlsx"
+            workbook.save(target)
+            workbook.close()
+            batch = read_import_workbook(target)
+
+        self.assertEqual(batch.teachers[0].teacher_code, "T-001")
+        self.assertEqual(batch.rooms[0].room_code, "MAIN-201")
+
     def test_rejects_forbidden_personal_columns(self) -> None:
         workbook = load_workbook(FIXTURES / "valid-import.xlsx")
         students = workbook["Студенты"]
