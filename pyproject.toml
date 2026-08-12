@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "college-timetable"
-version = "0.1.0"
+version = "0.2.1a1"
 description = "Локальная система подготовки и составления расписания колледжа"
 requires-python = ">=3.12"
 dependencies = [
@@ -21,6 +21,7 @@ test = ["httpx2>=2.3,<3"]
 
 [project.scripts]
 rasp = "rasp.cli:main"
+rasp-desktop = "rasp.desktop:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
