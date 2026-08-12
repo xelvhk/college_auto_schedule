@@ -150,7 +150,13 @@ def _run() -> int:
         SqliteImportRepository(database_path).initialize()
         app = create_app(database_path=database_path)
         server = uvicorn.Server(
-            uvicorn.Config(app, host=LOOPBACK_HOST, port=port, log_level="warning")
+            uvicorn.Config(
+                app,
+                host=LOOPBACK_HOST,
+                port=port,
+                log_config=None,
+                access_log=False,
+            )
         )
         browser_thread = threading.Thread(
             target=_open_browser_when_ready,

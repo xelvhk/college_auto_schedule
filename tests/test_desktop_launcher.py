@@ -5,7 +5,7 @@ import socket
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from rasp.desktop import (
     InstanceLock,
@@ -73,6 +73,27 @@ class DesktopLauncherTests(unittest.TestCase):
             log = (data_directory / "startup-error.log").read_text(encoding="utf-8")
             self.assertEqual(exit_code, 1)
             self.assertIn("RuntimeError: startup failed", log)
+
+    def test_desktop_server_does_not_require_console_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            listener = MagicMock()
+            listener.close = MagicMock()
+            server = MagicMock()
+            server.started = True
+            with (
+                patch("rasp.desktop.resolve_data_directory", return_value=Path(directory)),
+                patch("rasp.desktop.reserve_loopback_socket", return_value=(listener, 43125)),
+                patch("rasp.desktop.SqliteImportRepository.initialize"),
+                patch("rasp.desktop.create_app", return_value=MagicMock()),
+                patch("rasp.desktop.uvicorn.Config", return_value=MagicMock()) as config,
+                patch("rasp.desktop.uvicorn.Server", return_value=server),
+                patch("rasp.desktop.threading.Thread"),
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertIsNone(config.call_args.kwargs["log_config"])
+        self.assertFalse(config.call_args.kwargs["access_log"])
 
     def test_reserved_socket_is_bound_to_loopback(self) -> None:
         try:
