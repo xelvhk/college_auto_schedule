@@ -25,6 +25,9 @@ class ReadinessIssue(BaseModel):
     semester: int | None = None
     lesson_type: LessonType | None = None
     difference_hours: int | None = None
+    section: str | None = None
+    object_code: str | None = None
+    remediation: str | None = None
 
 
 class RoomDeficit(BaseModel):
@@ -45,6 +48,18 @@ class ReadinessReport(BaseModel):
     @property
     def is_ready(self) -> bool:
         return all(issue.severity is not ReadinessSeverity.ERROR for issue in self.issues)
+
+    @property
+    def error_count(self) -> int:
+        return sum(
+            issue.severity is ReadinessSeverity.ERROR for issue in self.issues
+        )
+
+    @property
+    def warning_count(self) -> int:
+        return sum(
+            issue.severity is ReadinessSeverity.WARNING for issue in self.issues
+        )
 
 
 def analyze_curriculum_alignment(
@@ -189,9 +204,6 @@ def analyze_curriculum_alignment(
 
 
 def analyze_room_supply(imports: ImportBatch) -> tuple[RoomDeficit, ...]:
-    if not imports.rooms:
-        return ()
-
     deficits: list[RoomDeficit] = []
     groups = {group.group_code: group for group in imports.groups}
     for workload in imports.workloads:
@@ -217,3 +229,185 @@ def analyze_room_supply(imports: ImportBatch) -> tuple[RoomDeficit, ...]:
                 )
             )
     return tuple(deficits)
+
+
+def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
+    """Return a stable, privacy-safe preflight report for the future solver."""
+
+    issues: list[ReadinessIssue] = []
+    required_sections = (
+        ("teachers", imports.teachers, "missing_teachers", "Добавьте преподавателей."),
+        ("groups", imports.groups, "missing_groups", "Добавьте учебные группы."),
+        ("workloads", imports.workloads, "missing_workloads", "Добавьте нагрузку."),
+        (
+            "curricula",
+            imports.curricula,
+            "missing_curricula",
+            "Добавьте учебные планы.",
+        ),
+        (
+            "disciplines",
+            imports.disciplines,
+            "missing_disciplines",
+            "Добавьте дисциплины учебных планов.",
+        ),
+        (
+            "academic_years",
+            imports.academic_years,
+            "missing_academic_years",
+            "Добавьте учебный год.",
+        ),
+        (
+            "calendar_periods",
+            imports.calendar_periods,
+            "missing_calendar_periods",
+            "Добавьте хотя бы один период обучения.",
+        ),
+        (
+            "bell_slots",
+            imports.bell_slots,
+            "missing_bell_slots",
+            "Добавьте сетку звонков.",
+        ),
+    )
+    for section, records, code, remediation in required_sections:
+        if not records:
+            issues.append(
+                ReadinessIssue(
+                    severity=ReadinessSeverity.ERROR,
+                    code=code,
+                    message="Отсутствует обязательный раздел исходных данных",
+                    section=section,
+                    remediation=remediation,
+                )
+            )
+
+    if imports.groups and imports.curricula and imports.disciplines:
+        curriculum_report = analyze_curriculum_alignment(
+            imports,
+            ReferenceDataBatch(
+                specialties=imports.specialties,
+                curricula=imports.curricula,
+                disciplines=imports.disciplines,
+            ),
+        )
+        for issue in curriculum_report.issues:
+            issues.append(
+                issue.model_copy(
+                    update={
+                        "section": "workloads",
+                        "object_code": issue.discipline_code or issue.group_code,
+                        "remediation": (
+                            "Сверьте учебный план группы и распределённую нагрузку."
+                        ),
+                    }
+                )
+            )
+
+    for deficit in analyze_room_supply(imports):
+        issues.append(
+            ReadinessIssue(
+                severity=ReadinessSeverity.ERROR,
+                code="no_suitable_room",
+                message="Для строки нагрузки нет подходящей активной аудитории",
+                section="rooms",
+                object_code=deficit.workload_row_code,
+                group_code=deficit.group_code,
+                remediation=(
+                    "Добавьте аудиторию нужного типа, вместимости и оснащения "
+                    "или скорректируйте требования нагрузки."
+                ),
+            )
+        )
+
+    teachers = {teacher.teacher_code: teacher for teacher in imports.teachers}
+    academic_years = {
+        academic_year.academic_year: academic_year
+        for academic_year in imports.academic_years
+    }
+    period_scopes = {
+        (period.academic_year, period.semester)
+        for period in imports.calendar_periods
+        if period.semester is not None
+    }
+    bell_slot_years = {slot.academic_year for slot in imports.bell_slots}
+    for workload in imports.workloads:
+        teacher = teachers.get(workload.teacher_code)
+        academic_year = academic_years.get(workload.academic_year)
+        checks = (
+            (
+                teacher is not None and teacher.active,
+                "inactive_workload_teacher",
+                "Назначенный преподаватель неактивен",
+                "Активируйте преподавателя или измените назначение нагрузки.",
+            ),
+            (
+                academic_year is not None and academic_year.active,
+                "inactive_workload_academic_year",
+                "Учебный год нагрузки отсутствует или неактивен",
+                "Добавьте или активируйте учебный год, указанный в нагрузке.",
+            ),
+            (
+                (workload.academic_year, workload.semester) in period_scopes,
+                "missing_workload_period",
+                "Для нагрузки не найден учебный период семестра",
+                "Добавьте период нужного учебного года и семестра.",
+            ),
+            (
+                workload.academic_year in bell_slot_years,
+                "missing_workload_bell_slots",
+                "Для учебного года нагрузки не задана сетка звонков",
+                "Добавьте интервалы звонков для этого учебного года.",
+            ),
+        )
+        for passed, code, message, remediation in checks:
+            if not passed:
+                issues.append(
+                    ReadinessIssue(
+                        severity=ReadinessSeverity.ERROR,
+                        code=code,
+                        message=message,
+                        section="workloads",
+                        object_code=workload.workload_row_code,
+                        group_code=workload.group_code,
+                        remediation=remediation,
+                    )
+                )
+
+    if imports.academic_years and not imports.calendar_exceptions:
+        issues.append(
+            ReadinessIssue(
+                severity=ReadinessSeverity.WARNING,
+                code="calendar_exceptions_not_configured",
+                message="Исключения календаря не заданы",
+                section="calendar_exceptions",
+                remediation="Подтвердите, что праздники и переносы не требуются.",
+            )
+        )
+    if imports.academic_years and not imports.resource_unavailability:
+        issues.append(
+            ReadinessIssue(
+                severity=ReadinessSeverity.WARNING,
+                code="resource_unavailability_not_configured",
+                message="Недоступность ресурсов не задана",
+                section="resource_unavailability",
+                remediation=(
+                    "Подтвердите доступность преподавателей, групп и аудиторий."
+                ),
+            )
+        )
+
+    severity_order = {
+        ReadinessSeverity.ERROR: 0,
+        ReadinessSeverity.WARNING: 1,
+    }
+    issues.sort(
+        key=lambda issue: (
+            severity_order[issue.severity],
+            issue.code,
+            issue.section or "",
+            issue.object_code or "",
+            issue.group_code or "",
+        )
+    )
+    return ReadinessReport(issues=tuple(issues))

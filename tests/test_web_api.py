@@ -46,6 +46,8 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(script.status_code, 200)
         self.assertEqual(favicon.status_code, 200)
         self.assertIn("Импорт исходных данных", response.text)
+        self.assertIn('id="readiness-summary"', response.text)
+        self.assertIn("renderReadiness(payload.readiness)", script.text)
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
@@ -70,6 +72,8 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["resourceUnavailability"], 1)
         self.assertEqual(payload["studentChanges"]["created"], 1)
         self.assertEqual(payload["roomDeficits"], [])
+        self.assertTrue(payload["readiness"]["isReady"])
+        self.assertEqual(payload["readiness"]["issues"], [])
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 
@@ -94,6 +98,17 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status.json()["counts"]["rooms"], 1)
         self.assertEqual(status.json()["counts"]["academicYears"], 1)
 
+        readiness = self.client.get("/api/readiness")
+        self.assertEqual(readiness.status_code, 200)
+        self.assertTrue(readiness.json()["isReady"])
+        self.assertEqual(readiness.json()["errorCount"], 0)
+
+    def test_readiness_without_active_version_is_conflict(self) -> None:
+        response = self.client.get("/api/readiness")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "no_active_import")
+
     def test_preview_reports_workload_without_matching_room(self) -> None:
         source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
         workbook = load_workbook(source)
@@ -110,6 +125,20 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.json()["roomDeficits"][0]["workloadRowCode"], "W-001")
         self.assertEqual(preview.json()["roomDeficits"][0]["requiredCapacity"], 25)
+        self.assertFalse(preview.json()["readiness"]["isReady"])
+        self.assertIn(
+            "no_suitable_room",
+            {issue["code"] for issue in preview.json()["readiness"]["issues"]},
+        )
+
+        activated = self.client.post(
+            "/api/imports/activate",
+            files={"file": ("rooms.xlsx", changed.getvalue(), XLSX_CONTENT_TYPE)},
+        )
+        readiness = self.client.get("/api/readiness")
+
+        self.assertEqual(activated.status_code, 201)
+        self.assertFalse(readiness.json()["isReady"])
 
     def test_curriculum_mismatch_does_not_replace_active_version(self) -> None:
         self.upload("/api/imports/activate", "valid-import.xlsx")

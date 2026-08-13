@@ -9,6 +9,8 @@ from rasp.application.imports import (
     validate_and_activate_workbook,
     validate_curriculum_readiness,
 )
+from rasp.application.readiness import ReadinessIssue, analyze_schedule_readiness
+from rasp.domain.models import ImportBatch
 from rasp.imports.excel import ImportValidationError, read_import_workbook
 from rasp.storage.sqlite import (
     SqliteImportRepository,
@@ -32,6 +34,10 @@ def _parser() -> argparse.ArgumentParser:
     activate.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     status = subparsers.add_parser("status", help="показать активную версию данных")
     status.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    readiness = subparsers.add_parser(
+        "readiness", help="проверить готовность активных данных к расчёту"
+    )
+    readiness.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     activate_version = subparsers.add_parser(
         "activate-version", help="вернуться к сохраненной версии данных"
     )
@@ -60,6 +66,33 @@ def _print_validation_error(error: ImportValidationError) -> None:
             ],
         }
     )
+
+
+def _readiness_issue_payload(issue: ReadinessIssue) -> dict[str, object]:
+    return {
+        "severity": issue.severity.value,
+        "code": issue.code,
+        "message": issue.message,
+        "section": issue.section,
+        "objectCode": issue.object_code,
+        "groupCode": issue.group_code,
+        "curriculumCode": issue.curriculum_code,
+        "disciplineCode": issue.discipline_code,
+        "semester": issue.semester,
+        "lessonType": issue.lesson_type.value if issue.lesson_type else None,
+        "differenceHours": issue.difference_hours,
+        "remediation": issue.remediation,
+    }
+
+
+def _readiness_payload(batch: ImportBatch) -> dict[str, object]:
+    report = analyze_schedule_readiness(batch)
+    return {
+        "isReady": report.is_ready,
+        "errorCount": report.error_count,
+        "warningCount": report.warning_count,
+        "issues": [_readiness_issue_payload(issue) for issue in report.issues],
+    }
 
 
 def _validate(file_path: Path) -> int:
@@ -226,6 +259,31 @@ def _activate_version(version_id: int, database_path: Path) -> int:
     return 0
 
 
+def _readiness(database_path: Path) -> int:
+    repository = SqliteImportRepository(database_path)
+    try:
+        repository.initialize()
+        batch = repository.get_active_batch()
+    except StorageError as error:
+        _print_json(
+            {"valid": False, "error": {"code": "storage_error", "message": str(error)}}
+        )
+        return 3
+    if batch is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": {
+                    "code": "no_active_import",
+                    "message": "No active import version",
+                },
+            }
+        )
+        return 5
+    _print_json(_readiness_payload(batch))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "validate":
@@ -234,6 +292,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _activate(arguments.file, arguments.database)
     if arguments.command == "status":
         return _status(arguments.database)
+    if arguments.command == "readiness":
+        return _readiness(arguments.database)
     if arguments.command == "activate-version":
         return _activate_version(arguments.version_id, arguments.database)
     raise AssertionError(f"Unhandled command: {arguments.command}")

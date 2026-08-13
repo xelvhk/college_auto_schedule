@@ -130,6 +130,32 @@ class ImportCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 4)
         self.assertEqual(result["error"]["code"], "version_not_found")
 
+    def test_readiness_reports_active_version(self) -> None:
+        self.run_cli(
+            "import",
+            str(FIXTURES / "valid-import.xlsx"),
+            "--database",
+            str(self.database_path),
+        )
+
+        exit_code, result = self.run_cli(
+            "readiness", "--database", str(self.database_path)
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["isReady"])
+        self.assertEqual(result["errorCount"], 0)
+        self.assertEqual(result["warningCount"], 0)
+        self.assertEqual(result["issues"], [])
+
+    def test_readiness_without_active_version_returns_stable_error(self) -> None:
+        exit_code, result = self.run_cli(
+            "readiness", "--database", str(self.database_path)
+        )
+
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(result["error"]["code"], "no_active_import")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import unittest
 
-from rasp.application.readiness import analyze_curriculum_alignment, analyze_room_supply
+from rasp.application.readiness import (
+    analyze_curriculum_alignment,
+    analyze_room_supply,
+    analyze_schedule_readiness,
+)
 from rasp.domain.models import (
+    AcademicYear,
+    BellSlot,
     Building,
+    CalendarException,
+    CalendarPeriod,
     Curriculum,
     CurriculumDiscipline,
     Group,
@@ -12,6 +20,7 @@ from rasp.domain.models import (
     ReferenceDataBatch,
     Room,
     RoomType,
+    ResourceUnavailability,
     Specialty,
     Teacher,
     WorkloadItem,
@@ -83,6 +92,82 @@ def make_reference_batch(*, planned_hours: int = 72) -> ReferenceDataBatch:
                 planned_hours=planned_hours,
             ),
         ),
+    )
+
+
+def make_ready_batch(*, hours: int = 72) -> ImportBatch:
+    imports = make_import_batch(hours=hours)
+    references = make_reference_batch()
+    return imports.model_copy(
+        update={
+            "specialties": references.specialties,
+            "curricula": references.curricula,
+            "disciplines": references.disciplines,
+            "buildings": (
+                Building(building_code="MAIN", building_name="Главный корпус"),
+            ),
+            "room_types": (
+                RoomType(
+                    room_type_code="CLASSROOM",
+                    room_type_name="Учебная аудитория",
+                ),
+            ),
+            "rooms": (
+                Room(
+                    room_code="MAIN-101",
+                    room_name="Аудитория 101",
+                    building_code="MAIN",
+                    room_type_code="CLASSROOM",
+                    capacity=30,
+                ),
+            ),
+            "academic_years": (
+                AcademicYear(
+                    academic_year="2026/2027",
+                    starts_on="2026-09-01",
+                    ends_on="2027-06-30",
+                ),
+            ),
+            "calendar_periods": (
+                CalendarPeriod(
+                    period_code="SEM-1",
+                    academic_year="2026/2027",
+                    period_name="Первый семестр",
+                    period_type="teaching",
+                    starts_on="2026-09-01",
+                    ends_on="2026-12-28",
+                    semester=1,
+                ),
+            ),
+            "bell_slots": (
+                BellSlot(
+                    slot_code="S1-01",
+                    academic_year="2026/2027",
+                    shift_code="S1",
+                    lesson_number=1,
+                    starts_at="08:30",
+                    ends_at="10:00",
+                ),
+            ),
+            "calendar_exceptions": (
+                CalendarException(
+                    exception_code="EX-001",
+                    academic_year="2026/2027",
+                    exception_type="holiday",
+                    exception_date="2026-11-04",
+                ),
+            ),
+            "resource_unavailability": (
+                ResourceUnavailability(
+                    unavailability_code="U-001",
+                    academic_year="2026/2027",
+                    resource_type="teacher",
+                    resource_code="T-001",
+                    starts_on="2026-10-01",
+                    ends_on="2026-10-01",
+                ),
+            ),
+        }
     )
 
 
@@ -208,6 +293,87 @@ class CurriculumReadinessTests(unittest.TestCase):
 
         self.assertEqual(deficits[0].workload_row_code, "W-001")
         self.assertEqual(deficits[0].required_capacity, 25)
+
+
+class ScheduleReadinessTests(unittest.TestCase):
+    def test_complete_batch_is_ready(self) -> None:
+        report = analyze_schedule_readiness(make_ready_batch())
+
+        self.assertTrue(report.is_ready)
+        self.assertEqual(report.error_count, 0)
+        self.assertEqual(report.warning_count, 0)
+        self.assertEqual(report.issues, ())
+
+    def test_missing_required_section_blocks_calculation(self) -> None:
+        batch = make_ready_batch().model_copy(update={"bell_slots": ()})
+
+        report = analyze_schedule_readiness(batch)
+
+        issue = next(issue for issue in report.issues if issue.code == "missing_bell_slots")
+        self.assertFalse(report.is_ready)
+        self.assertEqual(issue.section, "bell_slots")
+        self.assertIsNotNone(issue.remediation)
+
+    def test_room_deficit_blocks_calculation(self) -> None:
+        small_room = make_ready_batch().rooms[0].model_copy(update={"capacity": 20})
+        batch = make_ready_batch().model_copy(update={"rooms": (small_room,)})
+
+        report = analyze_schedule_readiness(batch)
+
+        issue = next(issue for issue in report.issues if issue.code == "no_suitable_room")
+        self.assertFalse(report.is_ready)
+        self.assertEqual(issue.object_code, "W-001")
+        self.assertEqual(issue.group_code, "ИС-101")
+
+    def test_workload_requires_active_teacher_and_matching_calendar(self) -> None:
+        batch = make_ready_batch()
+        batch = batch.model_copy(
+            update={
+                "teachers": (
+                    batch.teachers[0].model_copy(update={"active": False}),
+                ),
+                "academic_years": (
+                    batch.academic_years[0].model_copy(update={"active": False}),
+                ),
+                "calendar_periods": (
+                    batch.calendar_periods[0].model_copy(update={"semester": 2}),
+                ),
+                "bell_slots": (
+                    batch.bell_slots[0].model_copy(
+                        update={"academic_year": "2025/2026"}
+                    ),
+                ),
+            }
+        )
+
+        report = analyze_schedule_readiness(batch)
+        codes = {issue.code for issue in report.issues}
+
+        self.assertIn("inactive_workload_teacher", codes)
+        self.assertIn("inactive_workload_academic_year", codes)
+        self.assertIn("missing_workload_period", codes)
+        self.assertIn("missing_workload_bell_slots", codes)
+
+    def test_warnings_do_not_block_and_order_is_deterministic(self) -> None:
+        batch = make_ready_batch(hours=70).model_copy(
+            update={"calendar_exceptions": (), "resource_unavailability": ()}
+        )
+
+        first = analyze_schedule_readiness(batch)
+        second = analyze_schedule_readiness(batch)
+
+        self.assertTrue(first.is_ready)
+        self.assertEqual(first, second)
+        self.assertEqual(first.error_count, 0)
+        self.assertEqual(first.warning_count, 3)
+        self.assertEqual(
+            [issue.code for issue in first.issues],
+            [
+                "calendar_exceptions_not_configured",
+                "curriculum_hours_remaining",
+                "resource_unavailability_not_configured",
+            ],
+        )
 
 
 if __name__ == "__main__":

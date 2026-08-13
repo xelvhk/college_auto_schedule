@@ -17,8 +17,10 @@ from rasp.application.imports import (
     validate_curriculum_readiness,
 )
 from rasp.application.readiness import (
+    ReadinessIssue,
     ReadinessSeverity,
     analyze_room_supply,
+    analyze_schedule_readiness,
 )
 from rasp.domain.models import ImportBatch
 from rasp.imports.excel import (
@@ -83,6 +85,33 @@ def _readiness_warnings(batch: ImportBatch) -> list[dict[str, object]]:
         for issue in report.issues
         if issue.severity is ReadinessSeverity.WARNING
     ]
+
+
+def _readiness_issue_payload(issue: ReadinessIssue) -> dict[str, object]:
+    return {
+        "severity": issue.severity.value,
+        "code": issue.code,
+        "message": issue.message,
+        "section": issue.section,
+        "objectCode": issue.object_code,
+        "groupCode": issue.group_code,
+        "curriculumCode": issue.curriculum_code,
+        "disciplineCode": issue.discipline_code,
+        "semester": issue.semester,
+        "lessonType": issue.lesson_type.value if issue.lesson_type else None,
+        "differenceHours": issue.difference_hours,
+        "remediation": issue.remediation,
+    }
+
+
+def _readiness_payload(batch: ImportBatch) -> dict[str, object]:
+    report = analyze_schedule_readiness(batch)
+    return {
+        "isReady": report.is_ready,
+        "errorCount": report.error_count,
+        "warningCount": report.warning_count,
+        "issues": [_readiness_issue_payload(issue) for issue in report.issues],
+    }
 
 
 def _student_changes(
@@ -226,6 +255,17 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         except StorageError as error:
             raise ApiError(500, "storage_error", str(error)) from error
 
+    @app.get("/api/readiness")
+    def readiness() -> JSONResponse:
+        try:
+            repository.initialize()
+            batch = repository.get_active_batch()
+        except StorageError as error:
+            raise ApiError(500, "storage_error", str(error)) from error
+        if batch is None:
+            raise ApiError(409, "no_active_import", "Нет активной версии данных")
+        return JSONResponse(_readiness_payload(batch))
+
     @app.post("/api/imports/preview")
     async def preview(file: UploadFile) -> JSONResponse:
         async with _staged_upload(file) as staged_path:
@@ -258,6 +298,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     }
                     for item in analyze_room_supply(batch)
                 ],
+                "readiness": _readiness_payload(batch),
                 "warnings": _readiness_warnings(batch),
                 "samples": {
                     "teachers": [

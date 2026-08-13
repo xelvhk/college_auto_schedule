@@ -30,6 +30,10 @@ const elements = {
   bellSlotCount: document.querySelector("#bell-slot-count"),
   calendarExceptionCount: document.querySelector("#calendar-exception-count"),
   resourceUnavailabilityCount: document.querySelector("#resource-unavailability-count"),
+  readinessSummary: document.querySelector("#readiness-summary"),
+  readinessStatus: document.querySelector("#readiness-status"),
+  readinessCounts: document.querySelector("#readiness-counts"),
+  readinessIssues: document.querySelector("#readiness-issues"),
   roomDeficitSummary: document.querySelector("#room-deficit-summary"),
   roomDeficitText: document.querySelector("#room-deficit-text"),
   teacherPreview: document.querySelector("#teacher-preview"),
@@ -137,6 +141,21 @@ function renderTeacherRows(teachers) {
   });
 }
 
+function renderReadiness(readiness) {
+  elements.readinessSummary.classList.toggle("is-blocked", !readiness.isReady);
+  elements.readinessStatus.textContent = readiness.isReady
+    ? "Можно запускать расчёт"
+    : "Расчёт пока заблокирован";
+  elements.readinessCounts.textContent =
+    `Ошибки: ${readiness.errorCount} · Предупреждения: ${readiness.warningCount}`;
+  elements.readinessIssues.replaceChildren();
+  readiness.issues.forEach((issue) => {
+    const item = document.createElement("li");
+    item.textContent = `${issue.message}. ${issue.remediation || "Проверьте исходные данные."}`;
+    elements.readinessIssues.append(item);
+  });
+}
+
 async function previewFile() {
   if (!state.file) {
     setMessage("error", "Сначала выберите файл .xlsx");
@@ -169,6 +188,7 @@ async function previewFile() {
     elements.bellSlotCount.textContent = payload.counts.bellSlots;
     elements.calendarExceptionCount.textContent = payload.counts.calendarExceptions;
     elements.resourceUnavailabilityCount.textContent = payload.counts.resourceUnavailability;
+    renderReadiness(payload.readiness);
     const deficitCount = payload.roomDeficits.length;
     elements.roomDeficitSummary.hidden = deficitCount === 0;
     elements.roomDeficitText.textContent = deficitCount
@@ -180,12 +200,17 @@ async function previewFile() {
     elements.stepFile.className = "is-complete";
     elements.stepCheck.className = "is-current";
     elements.preview.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (payload.warnings.length) {
+    if (!payload.readiness.isReady) {
       setMessage(
         "warning",
-        `Файл проверен: предупреждений ${payload.warnings.length}`,
-        payload.warnings.map((warning) => ({
-          section: warning.groupCode || "учебный план",
+        `Файл можно активировать, но расчёт блокируют ошибки: ${payload.readiness.errorCount}`,
+      );
+    } else if (payload.readiness.warningCount) {
+      setMessage(
+        "warning",
+        `Файл проверен: предупреждений ${payload.readiness.warningCount}`,
+        payload.readiness.issues.map((warning) => ({
+          section: warning.section || "готовность",
           row: 0,
           message: `${warning.message}${warning.differenceHours ? ` (${warning.differenceHours} ч.)` : ""}`,
         })),
