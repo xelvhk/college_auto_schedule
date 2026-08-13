@@ -81,6 +81,16 @@ const russianHeaders = {
   lesson_number: "Номер занятия",
   starts_at: "Начало",
   ends_at: "Окончание",
+  exception_code: "Код исключения",
+  exception_type: "Тип исключения",
+  exception_date: "Дата исключения",
+  transferred_to: "Перенос на дату",
+  shortened_ends_at: "Сокращённый день до",
+  note: "Примечание",
+  unavailability_code: "Код недоступности",
+  resource_type: "Тип ресурса",
+  resource_code: "Код ресурса",
+  reason: "Причина",
 };
 const sheets = [
   {
@@ -343,9 +353,61 @@ const sheets = [
     ],
     example: ["S1-01", "2026/2027", "S1", 1, "08:30", "10:00"],
   },
+  {
+    name: "Исключения календаря",
+    headers: [
+      "exception_code",
+      "academic_year",
+      "exception_type",
+      "exception_date",
+      "transferred_to",
+      "shortened_ends_at",
+      "note",
+    ],
+    example: [
+      "EX-001",
+      "2026/2027",
+      "holiday",
+      new Date("2026-11-04T00:00:00Z"),
+      null,
+      null,
+      "День народного единства",
+    ],
+  },
+  {
+    name: "Недоступность",
+    headers: [
+      "unavailability_code",
+      "academic_year",
+      "resource_type",
+      "resource_code",
+      "starts_on",
+      "ends_on",
+      "starts_at",
+      "ends_at",
+      "reason",
+    ],
+    example: [
+      "U-001",
+      "2026/2027",
+      "teacher",
+      "T-001",
+      new Date("2026-10-01T00:00:00Z"),
+      new Date("2026-10-03T00:00:00Z"),
+      null,
+      null,
+      "Повышение квалификации",
+    ],
+  },
 ];
 
 function localizedHeader(sheetName, header) {
+  if (sheetName === "Недоступность" && header === "starts_at") {
+    return "Время начала";
+  }
+  if (sheetName === "Недоступность" && header === "ends_at") {
+    return "Время окончания";
+  }
   if (header !== "active") return russianHeaders[header];
   if (sheetName === "Специальности" || sheetName === "Аудитории") return "Активна";
   if (sheetName === "Оборудование") return "Активно";
@@ -390,6 +452,14 @@ workbook.worksheets
   .setNumberFormat("yyyy-mm-dd");
 workbook.worksheets
   .getItem("Периоды")
+  .getRange("E2:F2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Исключения календаря")
+  .getRange("D2:E2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Недоступность")
   .getRange("E2:F2")
   .setNumberFormat("yyyy-mm-dd");
 

@@ -7,7 +7,14 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from rasp.domain.models import AcademicYear, BellSlot, CalendarBatch, CalendarPeriod
+from rasp.domain.models import (
+    AcademicYear,
+    BellSlot,
+    CalendarBatch,
+    CalendarException,
+    CalendarPeriod,
+    ResourceUnavailability,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,16 +97,34 @@ def build_calendar_batch(
     academic_year_rows: Iterable[Mapping[str, Any]],
     period_rows: Iterable[Mapping[str, Any]],
     bell_slot_rows: Iterable[Mapping[str, Any]],
+    exception_rows: Iterable[Mapping[str, Any]] = (),
+    unavailability_rows: Iterable[Mapping[str, Any]] = (),
 ) -> CalendarBatch:
     years, issues = _parse_rows("academic_years", academic_year_rows, AcademicYear)
     periods, parsed_issues = _parse_rows("calendar_periods", period_rows, CalendarPeriod)
     issues.extend(parsed_issues)
     slots, parsed_issues = _parse_rows("bell_slots", bell_slot_rows, BellSlot)
     issues.extend(parsed_issues)
+    exceptions, parsed_issues = _parse_rows(
+        "calendar_exceptions", exception_rows, CalendarException
+    )
+    issues.extend(parsed_issues)
+    unavailability, parsed_issues = _parse_rows(
+        "resource_unavailability", unavailability_rows, ResourceUnavailability
+    )
+    issues.extend(parsed_issues)
 
     issues.extend(_duplicate_issues("academic_years", years, "academic_year"))
     issues.extend(_duplicate_issues("calendar_periods", periods, "period_code"))
     issues.extend(_duplicate_issues("bell_slots", slots, "slot_code"))
+    issues.extend(
+        _duplicate_issues("calendar_exceptions", exceptions, "exception_code")
+    )
+    issues.extend(
+        _duplicate_issues(
+            "resource_unavailability", unavailability, "unavailability_code"
+        )
+    )
 
     years_by_code = {year.academic_year: year for _, year in years}
     for row_number, period in periods:
@@ -153,7 +178,12 @@ def build_calendar_batch(
                             "Lesson number must be unique inside a shift",
                         )
                     )
-                if _times_overlap(first.starts_at, first.ends_at, second.starts_at, second.ends_at):
+                if _times_overlap(
+                    first.starts_at,
+                    first.ends_at,
+                    second.starts_at,
+                    second.ends_at,
+                ):
                     issues.append(
                         CalendarIssue(
                             "bell_slots",
@@ -164,10 +194,61 @@ def build_calendar_batch(
                         )
                     )
 
+    for row_number, exception in exceptions:
+        year = years_by_code.get(exception.academic_year)
+        dates = (exception.exception_date, exception.transferred_to)
+        if year is None:
+            issues.append(
+                CalendarIssue(
+                    "calendar_exceptions",
+                    row_number,
+                    "academic_year",
+                    "unknown_academic_year",
+                    "Calendar exception references an unknown academic year",
+                )
+            )
+        elif any(
+            value is not None and not year.starts_on <= value <= year.ends_on
+            for value in dates
+        ):
+            issues.append(
+                CalendarIssue(
+                    "calendar_exceptions",
+                    row_number,
+                    "exception_date",
+                    "exception_outside_academic_year",
+                    "Calendar exception must fit inside its academic year",
+                )
+            )
+
+    for row_number, unavailable in unavailability:
+        year = years_by_code.get(unavailable.academic_year)
+        if year is None:
+            issues.append(
+                CalendarIssue(
+                    "resource_unavailability",
+                    row_number,
+                    "academic_year",
+                    "unknown_academic_year",
+                    "Unavailability references an unknown academic year",
+                )
+            )
+        elif unavailable.starts_on < year.starts_on or unavailable.ends_on > year.ends_on:
+            issues.append(
+                CalendarIssue(
+                    "resource_unavailability",
+                    row_number,
+                    "starts_on",
+                    "unavailability_outside_academic_year",
+                    "Unavailability must fit inside its academic year",
+                )
+            )
     if issues:
         raise CalendarValidationError(issues)
     return CalendarBatch(
         academic_years=tuple(record for _, record in years),
         periods=tuple(record for _, record in periods),
         bell_slots=tuple(record for _, record in slots),
+        exceptions=tuple(record for _, record in exceptions),
+        unavailability=tuple(record for _, record in unavailability),
     )

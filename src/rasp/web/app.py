@@ -62,6 +62,8 @@ def _counts(batch: ImportBatch | None) -> dict[str, int]:
         "academicYears": len(batch.academic_years) if batch else 0,
         "calendarPeriods": len(batch.calendar_periods) if batch else 0,
         "bellSlots": len(batch.bell_slots) if batch else 0,
+        "calendarExceptions": len(batch.calendar_exceptions) if batch else 0,
+        "resourceUnavailability": len(batch.resource_unavailability) if batch else 0,
     }
 
 
@@ -360,6 +362,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "academicYears": receipt.academic_year_count,
                     "calendarPeriods": receipt.calendar_period_count,
                     "bellSlots": receipt.bell_slot_count,
+                    "calendarExceptions": receipt.calendar_exception_count,
+                    "resourceUnavailability": receipt.resource_unavailability_count,
                 },
             },
         )

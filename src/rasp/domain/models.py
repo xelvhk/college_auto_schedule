@@ -76,6 +76,19 @@ class CalendarPeriodType(StrEnum):
     VACATION = "vacation"
 
 
+class CalendarExceptionType(StrEnum):
+    HOLIDAY = "holiday"
+    SHORTENED_DAY = "shortened_day"
+    WORKING_DAY = "working_day"
+    TRANSFERRED_DAY = "transferred_day"
+
+
+class ResourceType(StrEnum):
+    TEACHER = "teacher"
+    GROUP = "group"
+    ROOM = "room"
+
+
 class StudentStatus(StrEnum):
     ACTIVE = "active"
     ACADEMIC_LEAVE = "academic_leave"
@@ -257,6 +270,70 @@ class BellSlot(DomainModel):
         return self
 
 
+class CalendarException(DomainModel):
+    exception_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    exception_type: CalendarExceptionType
+    exception_date: date
+    transferred_to: date | None = None
+    shortened_ends_at: time | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("exception_code")
+    @classmethod
+    def normalize_exception_code(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def type_specific_fields_are_complete(self) -> CalendarException:
+        if (
+            self.exception_type is CalendarExceptionType.TRANSFERRED_DAY
+            and self.transferred_to is None
+        ):
+            raise ValueError("transferred_day requires transferred_to")
+        if (
+            self.exception_type is CalendarExceptionType.SHORTENED_DAY
+            and self.shortened_ends_at is None
+        ):
+            raise ValueError("shortened_day requires shortened_ends_at")
+        return self
+
+
+class ResourceUnavailability(DomainModel):
+    unavailability_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    resource_type: ResourceType
+    resource_code: Code
+    starts_on: date
+    ends_on: date
+    starts_at: time | None = None
+    ends_at: time | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("unavailability_code", "resource_code")
+    @classmethod
+    def normalize_unavailability_codes(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def interval_is_complete_and_ordered(self) -> ResourceUnavailability:
+        if self.ends_on < self.starts_on:
+            raise ValueError("ends_on must not be earlier than starts_on")
+        if (self.starts_at is None) != (self.ends_at is None):
+            raise ValueError("starts_at and ends_at must be provided together")
+        if (
+            self.starts_at is not None
+            and self.ends_at is not None
+            and self.ends_at <= self.starts_at
+        ):
+            raise ValueError("ends_at must be later than starts_at")
+        return self
+
+
 class Student(DomainModel):
     student_code: Code
     full_name: ShortText
@@ -432,6 +509,8 @@ class ImportBatch(DomainModel):
     academic_years: tuple[AcademicYear, ...] = ()
     calendar_periods: tuple[CalendarPeriod, ...] = ()
     bell_slots: tuple[BellSlot, ...] = ()
+    calendar_exceptions: tuple[CalendarException, ...] = ()
+    resource_unavailability: tuple[ResourceUnavailability, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):
@@ -444,3 +523,5 @@ class CalendarBatch(DomainModel):
     academic_years: tuple[AcademicYear, ...]
     periods: tuple[CalendarPeriod, ...]
     bell_slots: tuple[BellSlot, ...]
+    exceptions: tuple[CalendarException, ...] = ()
+    unavailability: tuple[ResourceUnavailability, ...] = ()

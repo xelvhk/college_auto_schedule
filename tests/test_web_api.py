@@ -66,6 +66,8 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["academicYears"], 1)
         self.assertEqual(payload["counts"]["calendarPeriods"], 1)
         self.assertEqual(payload["counts"]["bellSlots"], 1)
+        self.assertEqual(payload["counts"]["calendarExceptions"], 1)
+        self.assertEqual(payload["counts"]["resourceUnavailability"], 1)
         self.assertEqual(payload["studentChanges"]["created"], 1)
         self.assertEqual(payload["roomDeficits"], [])
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")

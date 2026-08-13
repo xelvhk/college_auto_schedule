@@ -28,6 +28,8 @@ const elements = {
   academicYearCount: document.querySelector("#academic-year-count"),
   calendarPeriodCount: document.querySelector("#calendar-period-count"),
   bellSlotCount: document.querySelector("#bell-slot-count"),
+  calendarExceptionCount: document.querySelector("#calendar-exception-count"),
+  resourceUnavailabilityCount: document.querySelector("#resource-unavailability-count"),
   roomDeficitSummary: document.querySelector("#room-deficit-summary"),
   roomDeficitText: document.querySelector("#room-deficit-text"),
   teacherPreview: document.querySelector("#teacher-preview"),
@@ -165,6 +167,8 @@ async function previewFile() {
     elements.academicYearCount.textContent = payload.counts.academicYears;
     elements.calendarPeriodCount.textContent = payload.counts.calendarPeriods;
     elements.bellSlotCount.textContent = payload.counts.bellSlots;
+    elements.calendarExceptionCount.textContent = payload.counts.calendarExceptions;
+    elements.resourceUnavailabilityCount.textContent = payload.counts.resourceUnavailability;
     const deficitCount = payload.roomDeficits.length;
     elements.roomDeficitSummary.hidden = deficitCount === 0;
     elements.roomDeficitText.textContent = deficitCount

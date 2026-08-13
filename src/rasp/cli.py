@@ -87,6 +87,8 @@ def _validate(file_path: Path) -> int:
                 "academicYears": len(batch.academic_years),
                 "calendarPeriods": len(batch.calendar_periods),
                 "bellSlots": len(batch.bell_slots),
+                "calendarExceptions": len(batch.calendar_exceptions),
+                "resourceUnavailability": len(batch.resource_unavailability),
             },
         }
     )
@@ -130,6 +132,8 @@ def _activate(file_path: Path, database_path: Path) -> int:
                 "academicYears": receipt.academic_year_count,
                 "calendarPeriods": receipt.calendar_period_count,
                 "bellSlots": receipt.bell_slot_count,
+                "calendarExceptions": receipt.calendar_exception_count,
+                "resourceUnavailability": receipt.resource_unavailability_count,
             },
         }
     )
@@ -170,6 +174,10 @@ def _status(database_path: Path) -> int:
                 "academicYears": len(batch.academic_years) if batch else 0,
                 "calendarPeriods": len(batch.calendar_periods) if batch else 0,
                 "bellSlots": len(batch.bell_slots) if batch else 0,
+                "calendarExceptions": len(batch.calendar_exceptions) if batch else 0,
+                "resourceUnavailability": len(batch.resource_unavailability)
+                if batch
+                else 0,
             },
             "versions": [
                 {

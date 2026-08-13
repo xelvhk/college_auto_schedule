@@ -10,6 +10,7 @@ from rasp.domain.models import (
     AcademicYear,
     BellSlot,
     Building,
+    CalendarException,
     CalendarPeriod,
     Curriculum,
     CurriculumDiscipline,
@@ -18,6 +19,7 @@ from rasp.domain.models import (
     ImportBatch,
     Room,
     RoomType,
+    ResourceUnavailability,
     Specialty,
     Student,
     Teacher,
@@ -161,6 +163,26 @@ def make_full_batch() -> ImportBatch:
                     ends_at="10:00",
                 ),
             ),
+            "calendar_exceptions": (
+                CalendarException(
+                    exception_code="EX-001",
+                    academic_year="2026/2027",
+                    exception_type="holiday",
+                    exception_date="2026-11-04",
+                    note="День народного единства",
+                ),
+            ),
+            "resource_unavailability": (
+                ResourceUnavailability(
+                    unavailability_code="U-001",
+                    academic_year="2026/2027",
+                    resource_type="teacher",
+                    resource_code="T-001",
+                    starts_on="2026-10-01",
+                    ends_on="2026-10-03",
+                    reason="Повышение квалификации",
+                ),
+            ),
         }
     )
 
@@ -208,6 +230,8 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(len(restored.academic_years), 1)
         self.assertEqual(len(restored.calendar_periods), 1)
         self.assertEqual(len(restored.bell_slots), 1)
+        self.assertEqual(receipt.calendar_exception_count, 1)
+        self.assertEqual(receipt.resource_unavailability_count, 1)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
@@ -383,7 +407,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

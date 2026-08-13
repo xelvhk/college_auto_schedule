@@ -74,6 +74,10 @@ CALENDAR_SHEETS = {
     "Периоды": "calendar_periods",
     "Сетка звонков": "bell_slots",
 }
+CALENDAR_CONSTRAINT_SHEETS = {
+    "Исключения календаря": "calendar_exceptions",
+    "Недоступность": "resource_unavailability",
+}
 RUSSIAN_HEADERS = {
     "Преподаватели": {
         "teacher_code": "Код преподавателя",
@@ -202,6 +206,26 @@ RUSSIAN_HEADERS = {
         "starts_at": "Начало",
         "ends_at": "Окончание",
     },
+    "Исключения календаря": {
+        "exception_code": "Код исключения",
+        "academic_year": "Учебный год",
+        "exception_type": "Тип исключения",
+        "exception_date": "Дата исключения",
+        "transferred_to": "Перенос на дату",
+        "shortened_ends_at": "Сокращённый день до",
+        "note": "Примечание",
+    },
+    "Недоступность": {
+        "unavailability_code": "Код недоступности",
+        "academic_year": "Учебный год",
+        "resource_type": "Тип ресурса",
+        "resource_code": "Код ресурса",
+        "starts_on": "Дата начала",
+        "ends_on": "Дата окончания",
+        "starts_at": "Время начала",
+        "ends_at": "Время окончания",
+        "reason": "Причина",
+    },
 }
 FORBIDDEN_STUDENT_HEADERS = {
     "address",
@@ -284,6 +308,13 @@ REQUIRED_HEADERS = {
         "slot_code", "academic_year", "shift_code", "lesson_number",
         "starts_at", "ends_at",
     },
+    "Исключения календаря": {
+        "exception_code", "academic_year", "exception_type", "exception_date",
+    },
+    "Недоступность": {
+        "unavailability_code", "academic_year", "resource_type", "resource_code",
+        "starts_on", "ends_on",
+    },
 }
 
 
@@ -353,6 +384,8 @@ def build_import_batch(
     academic_year_rows: Iterable[Mapping[str, Any]] | None = None,
     calendar_period_rows: Iterable[Mapping[str, Any]] | None = None,
     bell_slot_rows: Iterable[Mapping[str, Any]] | None = None,
+    calendar_exception_rows: Iterable[Mapping[str, Any]] | None = None,
+    resource_unavailability_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -570,13 +603,32 @@ def build_import_batch(
                 )
 
     calendar = None
-    calendar_inputs = (academic_year_rows, calendar_period_rows, bell_slot_rows)
-    if any(rows is not None for rows in calendar_inputs):
-        if not all(rows is not None for rows in calendar_inputs):
+    base_calendar_inputs = (
+        academic_year_rows,
+        calendar_period_rows,
+        bell_slot_rows,
+    )
+    constraint_inputs = (
+        calendar_exception_rows,
+        resource_unavailability_rows,
+    )
+    has_base_calendar = any(rows is not None for rows in base_calendar_inputs)
+    has_constraints = any(rows is not None for rows in constraint_inputs)
+    if has_base_calendar or has_constraints:
+        if not all(rows is not None for rows in base_calendar_inputs):
             issues.append(
                 ImportIssue(
                     "file", 0, None, "incomplete_calendar_data",
-                    "All calendar sections must be provided together",
+                    "All base calendar sections must be provided together",
+                )
+            )
+        elif has_constraints and not all(
+            rows is not None for rows in constraint_inputs
+        ):
+            issues.append(
+                ImportIssue(
+                    "file", 0, None, "incomplete_calendar_constraints",
+                    "Both calendar constraint sections must be provided together",
                 )
             )
         else:
@@ -585,6 +637,8 @@ def build_import_batch(
                     academic_year_rows=academic_year_rows or (),
                     period_rows=calendar_period_rows or (),
                     bell_slot_rows=bell_slot_rows or (),
+                    exception_rows=calendar_exception_rows or (),
+                    unavailability_rows=resource_unavailability_rows or (),
                 )
             except CalendarValidationError as error:
                 issues.extend(
@@ -606,6 +660,24 @@ def build_import_batch(
                         "academic_year",
                         "unknown_workload_academic_year",
                         "Workload references an unknown academic year",
+                    )
+                )
+        resource_codes = {
+            "teacher": {item.teacher_code for item in teachers},
+            "group": {item.group_code for item in groups},
+            "room": {item.room_code for item in rooms},
+        }
+        for row_number, unavailable in enumerate(calendar.unavailability, start=2):
+            if unavailable.resource_code not in resource_codes[
+                unavailable.resource_type.value
+            ]:
+                issues.append(
+                    ImportIssue(
+                        "resource_unavailability",
+                        row_number,
+                        "resource_code",
+                        "unknown_unavailability_resource",
+                        "Unavailability references an unknown resource of this type",
                     )
                 )
 
@@ -630,6 +702,8 @@ def build_import_batch(
             "academic_years": calendar.academic_years if calendar else (),
             "calendar_periods": calendar.periods if calendar else (),
             "bell_slots": calendar.bell_slots if calendar else (),
+            "calendar_exceptions": calendar.exceptions if calendar else (),
+            "resource_unavailability": calendar.unavailability if calendar else (),
         }
     )
 
@@ -873,6 +947,7 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         reference_sheets_present = set(REFERENCE_SHEETS) & available_sheets
         room_sheets_present = set(ROOM_SHEETS) & available_sheets
         calendar_sheets_present = set(CALENDAR_SHEETS) & available_sheets
+        constraint_sheets_present = set(CALENDAR_CONSTRAINT_SHEETS) & available_sheets
         if reference_sheets_present and reference_sheets_present != set(
             REFERENCE_SHEETS
         ):
@@ -880,6 +955,12 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         if room_sheets_present and room_sheets_present != set(ROOM_SHEETS):
             missing_sheets |= set(ROOM_SHEETS) - available_sheets
         if calendar_sheets_present and calendar_sheets_present != set(CALENDAR_SHEETS):
+            missing_sheets |= set(CALENDAR_SHEETS) - available_sheets
+        if constraint_sheets_present and constraint_sheets_present != set(
+            CALENDAR_CONSTRAINT_SHEETS
+        ):
+            missing_sheets |= set(CALENDAR_CONSTRAINT_SHEETS) - available_sheets
+        if constraint_sheets_present and not calendar_sheets_present:
             missing_sheets |= set(CALENDAR_SHEETS) - available_sheets
         if missing_sheets:
             raise ImportValidationError(
@@ -905,6 +986,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             selected_sheets.update(ROOM_SHEETS)
         if calendar_sheets_present:
             selected_sheets.update(CALENDAR_SHEETS)
+        if constraint_sheets_present:
+            selected_sheets.update(CALENDAR_CONSTRAINT_SHEETS)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -928,6 +1011,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             academic_year_rows=rows.get("academic_years"),
             calendar_period_rows=rows.get("calendar_periods"),
             bell_slot_rows=rows.get("bell_slots"),
+            calendar_exception_rows=rows.get("calendar_exceptions"),
+            resource_unavailability_rows=rows.get("resource_unavailability"),
         )
     finally:
         workbook.close()

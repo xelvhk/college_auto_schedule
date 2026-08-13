@@ -14,6 +14,7 @@ from rasp.domain.models import (
     AcademicYear,
     BellSlot,
     Building,
+    CalendarException,
     CalendarPeriod,
     Curriculum,
     CurriculumDiscipline,
@@ -22,6 +23,7 @@ from rasp.domain.models import (
     ImportBatch,
     Room,
     RoomType,
+    ResourceUnavailability,
     Specialty,
     Student,
     Teacher,
@@ -29,7 +31,7 @@ from rasp.domain.models import (
 )
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -253,6 +255,38 @@ CREATE TABLE IF NOT EXISTS bell_slots (
         DEFERRABLE INITIALLY DEFERRED
 );
 
+CREATE TABLE IF NOT EXISTS calendar_exceptions (
+    import_version_id INTEGER NOT NULL,
+    exception_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    exception_type TEXT NOT NULL,
+    exception_date TEXT NOT NULL,
+    transferred_to TEXT,
+    shortened_ends_at TEXT,
+    note TEXT,
+    PRIMARY KEY (import_version_id, exception_code),
+    FOREIGN KEY (import_version_id, academic_year)
+        REFERENCES academic_years(import_version_id, academic_year)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE IF NOT EXISTS resource_unavailability (
+    import_version_id INTEGER NOT NULL,
+    unavailability_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_code TEXT NOT NULL,
+    starts_on TEXT NOT NULL,
+    ends_on TEXT NOT NULL,
+    starts_at TEXT,
+    ends_at TEXT,
+    reason TEXT,
+    PRIMARY KEY (import_version_id, unavailability_code),
+    FOREIGN KEY (import_version_id, academic_year)
+        REFERENCES academic_years(import_version_id, academic_year)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
 CREATE TABLE IF NOT EXISTS workload_items (
     import_version_id INTEGER NOT NULL,
     workload_row_code TEXT NOT NULL,
@@ -312,6 +346,8 @@ class ImportReceipt:
     academic_year_count: int
     calendar_period_count: int
     bell_slot_count: int
+    calendar_exception_count: int
+    resource_unavailability_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +466,10 @@ class SqliteImportRepository:
                     academic_year_count = len(batch.academic_years)
                     calendar_period_count = len(batch.calendar_periods)
                     bell_slot_count = len(batch.bell_slots)
+                    calendar_exception_count = len(batch.calendar_exceptions)
+                    resource_unavailability_count = len(
+                        batch.resource_unavailability
+                    )
 
                 if existing is not None:
                     (
@@ -447,6 +487,8 @@ class SqliteImportRepository:
                         academic_year_count,
                         calendar_period_count,
                         bell_slot_count,
+                        calendar_exception_count,
+                        resource_unavailability_count,
                     ) = counts
 
                 connection.execute(
@@ -478,6 +520,8 @@ class SqliteImportRepository:
             academic_year_count=academic_year_count,
             calendar_period_count=calendar_period_count,
             bell_slot_count=bell_slot_count,
+            calendar_exception_count=calendar_exception_count,
+            resource_unavailability_count=resource_unavailability_count,
         )
 
     @staticmethod
@@ -536,6 +580,14 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM bell_slots WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
+        calendar_exceptions = connection.execute(
+            "SELECT COUNT(*) FROM calendar_exceptions WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        resource_unavailability = connection.execute(
+            "SELECT COUNT(*) FROM resource_unavailability WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -551,6 +603,8 @@ class SqliteImportRepository:
             int(academic_years),
             int(calendar_periods),
             int(bell_slots),
+            int(calendar_exceptions),
+            int(resource_unavailability),
         )
 
     def _insert_batch(
@@ -601,6 +655,46 @@ class SqliteImportRepository:
                     item.ends_at.isoformat(timespec="minutes"),
                 )
                 for item in batch.bell_slots
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO calendar_exceptions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.exception_code,
+                    item.academic_year,
+                    item.exception_type.value,
+                    item.exception_date.isoformat(),
+                    item.transferred_to.isoformat() if item.transferred_to else None,
+                    item.shortened_ends_at.isoformat(timespec="minutes")
+                    if item.shortened_ends_at
+                    else None,
+                    item.note,
+                )
+                for item in batch.calendar_exceptions
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO resource_unavailability VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.unavailability_code,
+                    item.academic_year,
+                    item.resource_type.value,
+                    item.resource_code,
+                    item.starts_on.isoformat(),
+                    item.ends_on.isoformat(),
+                    item.starts_at.isoformat(timespec="minutes")
+                    if item.starts_at
+                    else None,
+                    item.ends_at.isoformat(timespec="minutes")
+                    if item.ends_at
+                    else None,
+                    item.reason,
+                )
+                for item in batch.resource_unavailability
             ],
         )
         connection.executemany(
@@ -976,6 +1070,16 @@ class SqliteImportRepository:
                     "SELECT * FROM bell_slots WHERE import_version_id = ? ORDER BY academic_year, shift_code, lesson_number",
                     (version_id,),
                 ).fetchall()
+                calendar_exception_rows = connection.execute(
+                    "SELECT * FROM calendar_exceptions "
+                    "WHERE import_version_id = ? ORDER BY exception_date, exception_code",
+                    (version_id,),
+                ).fetchall()
+                resource_unavailability_rows = connection.execute(
+                    "SELECT * FROM resource_unavailability "
+                    "WHERE import_version_id = ? ORDER BY starts_on, unavailability_code",
+                    (version_id,),
+                ).fetchall()
         except sqlite3.Error as error:
             raise StorageError("Unable to read active import") from error
 
@@ -1008,6 +1112,14 @@ class SqliteImportRepository:
                 ),
                 bell_slots=tuple(
                     self._bell_slot_from_row(row) for row in bell_slot_rows
+                ),
+                calendar_exceptions=tuple(
+                    self._calendar_exception_from_row(row)
+                    for row in calendar_exception_rows
+                ),
+                resource_unavailability=tuple(
+                    self._resource_unavailability_from_row(row)
+                    for row in resource_unavailability_rows
                 ),
             )
         except ValidationError as error:
@@ -1180,4 +1292,32 @@ class SqliteImportRepository:
             lesson_number=row["lesson_number"],
             starts_at=row["starts_at"],
             ends_at=row["ends_at"],
+        )
+
+    @staticmethod
+    def _calendar_exception_from_row(row: sqlite3.Row) -> CalendarException:
+        return CalendarException(
+            exception_code=row["exception_code"],
+            academic_year=row["academic_year"],
+            exception_type=row["exception_type"],
+            exception_date=row["exception_date"],
+            transferred_to=row["transferred_to"],
+            shortened_ends_at=row["shortened_ends_at"],
+            note=row["note"],
+        )
+
+    @staticmethod
+    def _resource_unavailability_from_row(
+        row: sqlite3.Row,
+    ) -> ResourceUnavailability:
+        return ResourceUnavailability(
+            unavailability_code=row["unavailability_code"],
+            academic_year=row["academic_year"],
+            resource_type=row["resource_type"],
+            resource_code=row["resource_code"],
+            starts_on=row["starts_on"],
+            ends_on=row["ends_on"],
+            starts_at=row["starts_at"],
+            ends_at=row["ends_at"],
+            reason=row["reason"],
         )
