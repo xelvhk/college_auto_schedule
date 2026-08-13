@@ -45,6 +45,9 @@ class ImportCliTests(unittest.TestCase):
         self.assertEqual(status["counts"]["teachers"], 1)
         self.assertEqual(status["counts"]["students"], 1)
         self.assertEqual(status["counts"]["rooms"], 1)
+        self.assertEqual(status["counts"]["academicYears"], 1)
+        self.assertEqual(status["counts"]["calendarPeriods"], 1)
+        self.assertEqual(status["counts"]["bellSlots"], 1)
 
     def test_repeated_file_returns_reused_version(self) -> None:
         self.run_cli(

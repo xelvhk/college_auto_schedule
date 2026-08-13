@@ -233,6 +233,25 @@ class ImportBatchTests(unittest.TestCase):
 
         self.assertIn("unknown_room_building", {i.code for i in raised.exception.issues})
 
+    def test_workload_must_reference_imported_academic_year(self) -> None:
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(
+                teacher_rows=self.teacher_rows,
+                group_rows=self.group_rows,
+                workload_rows=self.workload_rows,
+                academic_year_rows=[
+                    {
+                        "academic_year": "2025/2026",
+                        "starts_on": "2025-09-01",
+                        "ends_on": "2026-06-30",
+                    }
+                ],
+                calendar_period_rows=[],
+                bell_slot_rows=[],
+            )
+
+        self.assertIn("unknown_workload_academic_year", {i.code for i in raised.exception.issues})
+
 
 class WorkbookImportTests(unittest.TestCase):
     def test_canonical_workbook_uses_russian_headers(self) -> None:
@@ -245,6 +264,9 @@ class WorkbookImportTests(unittest.TestCase):
                 workbook["Нагрузка"]["Q1"].value,
                 "Требуемое оборудование",
             )
+            self.assertEqual(workbook["Учебные годы"]["A1"].value, "Учебный год")
+            self.assertEqual(workbook["Периоды"]["D1"].value, "Тип периода")
+            self.assertEqual(workbook["Сетка звонков"]["E1"].value, "Начало")
         finally:
             workbook.close()
 
@@ -264,6 +286,23 @@ class WorkbookImportTests(unittest.TestCase):
 
         self.assertEqual(batch.teachers[0].teacher_code, "T-001")
         self.assertEqual(batch.rooms[0].room_code, "MAIN-201")
+        self.assertEqual(batch.academic_years[0].academic_year, "2026/2027")
+        self.assertEqual(batch.calendar_periods[0].period_code, "SEM-1")
+        self.assertEqual(batch.bell_slots[0].slot_code, "S1-01")
+
+    def test_rejects_partial_calendar_sheet_set(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx")
+        del workbook["Сетка звонков"]
+
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "partial-calendar.xlsx"
+            workbook.save(target)
+            workbook.close()
+            with self.assertRaises(ImportValidationError) as raised:
+                read_import_workbook(target)
+
+        self.assertEqual(raised.exception.issues[0].code, "missing_sheet")
+        self.assertIn("Сетка звонков", raised.exception.issues[0].message)
 
     def test_rejects_forbidden_personal_columns(self) -> None:
         workbook = load_workbook(FIXTURES / "valid-import.xlsx")

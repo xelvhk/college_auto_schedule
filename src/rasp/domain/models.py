@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from enum import StrEnum
 from typing import Annotated
 
@@ -66,6 +66,14 @@ class CurriculumStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class CalendarPeriodType(StrEnum):
+    TEACHING = "teaching"
+    PRACTICE = "practice"
+    EXAM_SESSION = "exam_session"
+    HOLIDAY = "holiday"
+    VACATION = "vacation"
 
 
 class StudentStatus(StrEnum):
@@ -180,6 +188,73 @@ class CurriculumDiscipline(DomainModel):
             self.semester,
             self.lesson_type,
         )
+
+
+class AcademicYear(DomainModel):
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    starts_on: date
+    ends_on: date
+    active: bool = True
+
+    @model_validator(mode="after")
+    def dates_match_year_code(self) -> AcademicYear:
+        first_year, second_year = (int(part) for part in self.academic_year.split("/"))
+        if second_year != first_year + 1:
+            raise ValueError("academic_year must contain consecutive years")
+        if self.ends_on < self.starts_on:
+            raise ValueError("ends_on must not be earlier than starts_on")
+        if self.starts_on.year != first_year or self.ends_on.year != second_year:
+            raise ValueError("academic year dates must match academic_year")
+        return self
+
+
+class CalendarPeriod(DomainModel):
+    period_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    period_name: ShortText
+    period_type: CalendarPeriodType
+    starts_on: date
+    ends_on: date
+    semester: int | None = Field(default=None, ge=1, le=2)
+
+    @field_validator("period_code")
+    @classmethod
+    def normalize_period_code(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def period_dates_are_ordered(self) -> CalendarPeriod:
+        if self.ends_on < self.starts_on:
+            raise ValueError("ends_on must not be earlier than starts_on")
+        if self.period_type is CalendarPeriodType.TEACHING and self.semester is None:
+            raise ValueError("teaching period requires semester")
+        return self
+
+
+class BellSlot(DomainModel):
+    slot_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    shift_code: Code
+    lesson_number: int = Field(ge=1, le=20)
+    starts_at: time
+    ends_at: time
+
+    @field_validator("slot_code", "shift_code")
+    @classmethod
+    def normalize_slot_codes(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def slot_times_are_ordered(self) -> BellSlot:
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be later than starts_at")
+        return self
 
 
 class Student(DomainModel):
@@ -354,9 +429,18 @@ class ImportBatch(DomainModel):
     room_types: tuple[RoomType, ...] = ()
     equipment: tuple[Equipment, ...] = ()
     rooms: tuple[Room, ...] = ()
+    academic_years: tuple[AcademicYear, ...] = ()
+    calendar_periods: tuple[CalendarPeriod, ...] = ()
+    bell_slots: tuple[BellSlot, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):
     specialties: tuple[Specialty, ...]
     curricula: tuple[Curriculum, ...]
     disciplines: tuple[CurriculumDiscipline, ...]
+
+
+class CalendarBatch(DomainModel):
+    academic_years: tuple[AcademicYear, ...]
+    periods: tuple[CalendarPeriod, ...]
+    bell_slots: tuple[BellSlot, ...]

@@ -71,6 +71,16 @@ const russianHeaders = {
   room_type: "Тип помещения",
   room_capacity: "Требуемая вместимость",
   required_equipment_codes: "Требуемое оборудование",
+  starts_on: "Дата начала",
+  ends_on: "Дата окончания",
+  period_code: "Код периода",
+  period_name: "Название периода",
+  period_type: "Тип периода",
+  slot_code: "Код интервала",
+  shift_code: "Код смены",
+  lesson_number: "Номер занятия",
+  starts_at: "Начало",
+  ends_at: "Окончание",
 };
 const sheets = [
   {
@@ -290,6 +300,49 @@ const sheets = [
       "COMPUTERS",
     ],
   },
+  {
+    name: "Учебные годы",
+    headers: ["academic_year", "starts_on", "ends_on", "active"],
+    example: [
+      "2026/2027",
+      new Date("2026-09-01T00:00:00Z"),
+      new Date("2027-06-30T00:00:00Z"),
+      true,
+    ],
+  },
+  {
+    name: "Периоды",
+    headers: [
+      "period_code",
+      "academic_year",
+      "period_name",
+      "period_type",
+      "starts_on",
+      "ends_on",
+      "semester",
+    ],
+    example: [
+      "SEM-1",
+      "2026/2027",
+      "Первый семестр",
+      "teaching",
+      new Date("2026-09-01T00:00:00Z"),
+      new Date("2026-12-28T00:00:00Z"),
+      1,
+    ],
+  },
+  {
+    name: "Сетка звонков",
+    headers: [
+      "slot_code",
+      "academic_year",
+      "shift_code",
+      "lesson_number",
+      "starts_at",
+      "ends_at",
+    ],
+    example: ["S1-01", "2026/2027", "S1", 1, "08:30", "10:00"],
+  },
 ];
 
 function localizedHeader(sheetName, header) {
@@ -329,6 +382,14 @@ workbook.worksheets
   .setNumberFormat("yyyy-mm-dd");
 workbook.worksheets
   .getItem("Студенты")
+  .getRange("E2:F2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Учебные годы")
+  .getRange("B2:C2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Периоды")
   .getRange("E2:F2")
   .setNumberFormat("yyyy-mm-dd");
 

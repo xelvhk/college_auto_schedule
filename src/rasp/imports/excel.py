@@ -26,6 +26,7 @@ from rasp.imports.reference_data import (
     ReferenceDataValidationError,
     build_reference_data_batch,
 )
+from rasp.imports.calendar import CalendarValidationError, build_calendar_batch
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +68,11 @@ ROOM_SHEETS = {
     "Типы помещений": "room_types",
     "Оборудование": "equipment",
     "Аудитории": "rooms",
+}
+CALENDAR_SHEETS = {
+    "Учебные годы": "academic_years",
+    "Периоды": "calendar_periods",
+    "Сетка звонков": "bell_slots",
 }
 RUSSIAN_HEADERS = {
     "Преподаватели": {
@@ -173,6 +179,29 @@ RUSSIAN_HEADERS = {
         "room_capacity": "Требуемая вместимость",
         "required_equipment_codes": "Требуемое оборудование",
     },
+    "Учебные годы": {
+        "academic_year": "Учебный год",
+        "starts_on": "Дата начала",
+        "ends_on": "Дата окончания",
+        "active": "Активен",
+    },
+    "Периоды": {
+        "period_code": "Код периода",
+        "academic_year": "Учебный год",
+        "period_name": "Название периода",
+        "period_type": "Тип периода",
+        "starts_on": "Дата начала",
+        "ends_on": "Дата окончания",
+        "semester": "Семестр",
+    },
+    "Сетка звонков": {
+        "slot_code": "Код интервала",
+        "academic_year": "Учебный год",
+        "shift_code": "Код смены",
+        "lesson_number": "Номер занятия",
+        "starts_at": "Начало",
+        "ends_at": "Окончание",
+    },
 }
 FORBIDDEN_STUDENT_HEADERS = {
     "address",
@@ -246,6 +275,15 @@ REQUIRED_HEADERS = {
         "room_type_code",
         "capacity",
     },
+    "Учебные годы": {"academic_year", "starts_on", "ends_on"},
+    "Периоды": {
+        "period_code", "academic_year", "period_name", "period_type",
+        "starts_on", "ends_on",
+    },
+    "Сетка звонков": {
+        "slot_code", "academic_year", "shift_code", "lesson_number",
+        "starts_at", "ends_at",
+    },
 }
 
 
@@ -312,6 +350,9 @@ def build_import_batch(
     room_type_rows: Iterable[Mapping[str, Any]] | None = None,
     equipment_rows: Iterable[Mapping[str, Any]] | None = None,
     room_rows: Iterable[Mapping[str, Any]] | None = None,
+    academic_year_rows: Iterable[Mapping[str, Any]] | None = None,
+    calendar_period_rows: Iterable[Mapping[str, Any]] | None = None,
+    bell_slot_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -528,6 +569,46 @@ def build_import_batch(
                     for issue in error.issues
                 )
 
+    calendar = None
+    calendar_inputs = (academic_year_rows, calendar_period_rows, bell_slot_rows)
+    if any(rows is not None for rows in calendar_inputs):
+        if not all(rows is not None for rows in calendar_inputs):
+            issues.append(
+                ImportIssue(
+                    "file", 0, None, "incomplete_calendar_data",
+                    "All calendar sections must be provided together",
+                )
+            )
+        else:
+            try:
+                calendar = build_calendar_batch(
+                    academic_year_rows=academic_year_rows or (),
+                    period_rows=calendar_period_rows or (),
+                    bell_slot_rows=bell_slot_rows or (),
+                )
+            except CalendarValidationError as error:
+                issues.extend(
+                    ImportIssue(
+                        issue.section, issue.row, issue.column, issue.code, issue.message
+                    )
+                    for issue in error.issues
+                )
+    if calendar is not None:
+        academic_year_codes = {
+            item.academic_year for item in calendar.academic_years
+        }
+        for row_number, workload in enumerate(workloads, start=2):
+            if workload.academic_year not in academic_year_codes:
+                issues.append(
+                    ImportIssue(
+                        "workloads",
+                        row_number,
+                        "academic_year",
+                        "unknown_workload_academic_year",
+                        "Workload references an unknown academic year",
+                    )
+                )
+
     operational_batch = ImportBatch(
         teachers=tuple(teachers),
         groups=tuple(groups),
@@ -546,6 +627,9 @@ def build_import_batch(
             "specialties": references.specialties,
             "curricula": references.curricula,
             "disciplines": references.disciplines,
+            "academic_years": calendar.academic_years if calendar else (),
+            "calendar_periods": calendar.periods if calendar else (),
+            "bell_slots": calendar.bell_slots if calendar else (),
         }
     )
 
@@ -788,12 +872,15 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         missing_sheets = set(CORE_SHEETS) - available_sheets
         reference_sheets_present = set(REFERENCE_SHEETS) & available_sheets
         room_sheets_present = set(ROOM_SHEETS) & available_sheets
+        calendar_sheets_present = set(CALENDAR_SHEETS) & available_sheets
         if reference_sheets_present and reference_sheets_present != set(
             REFERENCE_SHEETS
         ):
             missing_sheets |= set(REFERENCE_SHEETS) - available_sheets
         if room_sheets_present and room_sheets_present != set(ROOM_SHEETS):
             missing_sheets |= set(ROOM_SHEETS) - available_sheets
+        if calendar_sheets_present and calendar_sheets_present != set(CALENDAR_SHEETS):
+            missing_sheets |= set(CALENDAR_SHEETS) - available_sheets
         if missing_sheets:
             raise ImportValidationError(
                 [
@@ -816,6 +903,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             selected_sheets.update(STUDENT_SHEETS)
         if room_sheets_present:
             selected_sheets.update(ROOM_SHEETS)
+        if calendar_sheets_present:
+            selected_sheets.update(CALENDAR_SHEETS)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -836,6 +925,9 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             room_type_rows=rows.get("room_types"),
             equipment_rows=rows.get("equipment"),
             room_rows=rows.get("rooms"),
+            academic_year_rows=rows.get("academic_years"),
+            calendar_period_rows=rows.get("calendar_periods"),
+            bell_slot_rows=rows.get("bell_slots"),
         )
     finally:
         workbook.close()

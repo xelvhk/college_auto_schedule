@@ -25,6 +25,9 @@ const elements = {
   studentDeactivated: document.querySelector("#student-deactivated"),
   buildingCount: document.querySelector("#building-count"),
   roomCount: document.querySelector("#room-count"),
+  academicYearCount: document.querySelector("#academic-year-count"),
+  calendarPeriodCount: document.querySelector("#calendar-period-count"),
+  bellSlotCount: document.querySelector("#bell-slot-count"),
   roomDeficitSummary: document.querySelector("#room-deficit-summary"),
   roomDeficitText: document.querySelector("#room-deficit-text"),
   teacherPreview: document.querySelector("#teacher-preview"),
@@ -159,6 +162,9 @@ async function previewFile() {
     elements.studentDeactivated.textContent = payload.studentChanges.deactivated;
     elements.buildingCount.textContent = payload.counts.buildings;
     elements.roomCount.textContent = payload.counts.rooms;
+    elements.academicYearCount.textContent = payload.counts.academicYears;
+    elements.calendarPeriodCount.textContent = payload.counts.calendarPeriods;
+    elements.bellSlotCount.textContent = payload.counts.bellSlots;
     const deficitCount = payload.roomDeficits.length;
     elements.roomDeficitSummary.hidden = deficitCount === 0;
     elements.roomDeficitText.textContent = deficitCount

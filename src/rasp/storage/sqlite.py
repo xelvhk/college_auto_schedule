@@ -11,7 +11,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from rasp.domain.models import (
+    AcademicYear,
+    BellSlot,
     Building,
+    CalendarPeriod,
     Curriculum,
     CurriculumDiscipline,
     Equipment,
@@ -26,7 +29,7 @@ from rasp.domain.models import (
 )
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -210,6 +213,46 @@ CREATE TABLE IF NOT EXISTS curriculum_disciplines (
         DEFERRABLE INITIALLY DEFERRED
 );
 
+CREATE TABLE IF NOT EXISTS academic_years (
+    import_version_id INTEGER NOT NULL,
+    academic_year TEXT NOT NULL,
+    starts_on TEXT NOT NULL,
+    ends_on TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, academic_year),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS calendar_periods (
+    import_version_id INTEGER NOT NULL,
+    period_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    period_name TEXT NOT NULL,
+    period_type TEXT NOT NULL,
+    starts_on TEXT NOT NULL,
+    ends_on TEXT NOT NULL,
+    semester INTEGER,
+    PRIMARY KEY (import_version_id, period_code),
+    FOREIGN KEY (import_version_id, academic_year)
+        REFERENCES academic_years(import_version_id, academic_year)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE IF NOT EXISTS bell_slots (
+    import_version_id INTEGER NOT NULL,
+    slot_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    shift_code TEXT NOT NULL,
+    lesson_number INTEGER NOT NULL,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    PRIMARY KEY (import_version_id, slot_code),
+    FOREIGN KEY (import_version_id, academic_year)
+        REFERENCES academic_years(import_version_id, academic_year)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
 CREATE TABLE IF NOT EXISTS workload_items (
     import_version_id INTEGER NOT NULL,
     workload_row_code TEXT NOT NULL,
@@ -266,6 +309,9 @@ class ImportReceipt:
     room_type_count: int
     equipment_count: int
     room_count: int
+    academic_year_count: int
+    calendar_period_count: int
+    bell_slot_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +427,9 @@ class SqliteImportRepository:
                     room_type_count = len(batch.room_types)
                     equipment_count = len(batch.equipment)
                     room_count = len(batch.rooms)
+                    academic_year_count = len(batch.academic_years)
+                    calendar_period_count = len(batch.calendar_periods)
+                    bell_slot_count = len(batch.bell_slots)
 
                 if existing is not None:
                     (
@@ -395,6 +444,9 @@ class SqliteImportRepository:
                         room_type_count,
                         equipment_count,
                         room_count,
+                        academic_year_count,
+                        calendar_period_count,
+                        bell_slot_count,
                     ) = counts
 
                 connection.execute(
@@ -423,12 +475,15 @@ class SqliteImportRepository:
             room_type_count=room_type_count,
             equipment_count=equipment_count,
             room_count=room_count,
+            academic_year_count=academic_year_count,
+            calendar_period_count=calendar_period_count,
+            bell_slot_count=bell_slot_count,
         )
 
     @staticmethod
     def _version_counts(
         connection: sqlite3.Connection, version_id: int
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
+    ) -> tuple[int, ...]:
         teachers = connection.execute(
             "SELECT COUNT(*) FROM teachers WHERE import_version_id = ?",
             (version_id,),
@@ -469,6 +524,18 @@ class SqliteImportRepository:
         rooms = connection.execute(
             "SELECT COUNT(*) FROM rooms WHERE import_version_id = ?", (version_id,)
         ).fetchone()[0]
+        academic_years = connection.execute(
+            "SELECT COUNT(*) FROM academic_years WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        calendar_periods = connection.execute(
+            "SELECT COUNT(*) FROM calendar_periods WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        bell_slots = connection.execute(
+            "SELECT COUNT(*) FROM bell_slots WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -481,6 +548,9 @@ class SqliteImportRepository:
             int(room_types),
             int(equipment),
             int(rooms),
+            int(academic_years),
+            int(calendar_periods),
+            int(bell_slots),
         )
 
     def _insert_batch(
@@ -489,6 +559,50 @@ class SqliteImportRepository:
         version_id: int,
         batch: ImportBatch,
     ) -> None:
+        connection.executemany(
+            "INSERT INTO academic_years VALUES (?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.academic_year,
+                    item.starts_on.isoformat(),
+                    item.ends_on.isoformat(),
+                    int(item.active),
+                )
+                for item in batch.academic_years
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO calendar_periods VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.period_code,
+                    item.academic_year,
+                    item.period_name,
+                    item.period_type.value,
+                    item.starts_on.isoformat(),
+                    item.ends_on.isoformat(),
+                    item.semester,
+                )
+                for item in batch.calendar_periods
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO bell_slots VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.slot_code,
+                    item.academic_year,
+                    item.shift_code,
+                    item.lesson_number,
+                    item.starts_at.isoformat(timespec="minutes"),
+                    item.ends_at.isoformat(timespec="minutes"),
+                )
+                for item in batch.bell_slots
+            ],
+        )
         connection.executemany(
             "INSERT INTO buildings VALUES (?, ?, ?, ?)",
             [
@@ -850,6 +964,18 @@ class SqliteImportRepository:
                     """,
                     (version_id,),
                 ).fetchall()
+                academic_year_rows = connection.execute(
+                    "SELECT * FROM academic_years WHERE import_version_id = ? ORDER BY academic_year",
+                    (version_id,),
+                ).fetchall()
+                calendar_period_rows = connection.execute(
+                    "SELECT * FROM calendar_periods WHERE import_version_id = ? ORDER BY period_code",
+                    (version_id,),
+                ).fetchall()
+                bell_slot_rows = connection.execute(
+                    "SELECT * FROM bell_slots WHERE import_version_id = ? ORDER BY academic_year, shift_code, lesson_number",
+                    (version_id,),
+                ).fetchall()
         except sqlite3.Error as error:
             raise StorageError("Unable to read active import") from error
 
@@ -874,6 +1000,15 @@ class SqliteImportRepository:
                 room_types=tuple(self._room_type_from_row(row) for row in room_type_rows),
                 equipment=tuple(self._equipment_from_row(row) for row in equipment_rows),
                 rooms=tuple(self._room_from_row(row) for row in room_rows),
+                academic_years=tuple(
+                    self._academic_year_from_row(row) for row in academic_year_rows
+                ),
+                calendar_periods=tuple(
+                    self._calendar_period_from_row(row) for row in calendar_period_rows
+                ),
+                bell_slots=tuple(
+                    self._bell_slot_from_row(row) for row in bell_slot_rows
+                ),
             )
         except ValidationError as error:
             raise StorageError("Database contains invalid stored data") from error
@@ -1013,4 +1148,36 @@ class SqliteImportRepository:
             capacity=row["capacity"],
             equipment_codes=row["equipment_codes"],
             active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _academic_year_from_row(row: sqlite3.Row) -> AcademicYear:
+        return AcademicYear(
+            academic_year=row["academic_year"],
+            starts_on=row["starts_on"],
+            ends_on=row["ends_on"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _calendar_period_from_row(row: sqlite3.Row) -> CalendarPeriod:
+        return CalendarPeriod(
+            period_code=row["period_code"],
+            academic_year=row["academic_year"],
+            period_name=row["period_name"],
+            period_type=row["period_type"],
+            starts_on=row["starts_on"],
+            ends_on=row["ends_on"],
+            semester=row["semester"],
+        )
+
+    @staticmethod
+    def _bell_slot_from_row(row: sqlite3.Row) -> BellSlot:
+        return BellSlot(
+            slot_code=row["slot_code"],
+            academic_year=row["academic_year"],
+            shift_code=row["shift_code"],
+            lesson_number=row["lesson_number"],
+            starts_at=row["starts_at"],
+            ends_at=row["ends_at"],
         )

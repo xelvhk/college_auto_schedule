@@ -84,6 +84,9 @@ def _validate(file_path: Path) -> int:
                 "roomTypes": len(batch.room_types),
                 "equipment": len(batch.equipment),
                 "rooms": len(batch.rooms),
+                "academicYears": len(batch.academic_years),
+                "calendarPeriods": len(batch.calendar_periods),
+                "bellSlots": len(batch.bell_slots),
             },
         }
     )
@@ -124,6 +127,9 @@ def _activate(file_path: Path, database_path: Path) -> int:
                 "roomTypes": receipt.room_type_count,
                 "equipment": receipt.equipment_count,
                 "rooms": receipt.room_count,
+                "academicYears": receipt.academic_year_count,
+                "calendarPeriods": receipt.calendar_period_count,
+                "bellSlots": receipt.bell_slot_count,
             },
         }
     )
@@ -161,6 +167,9 @@ def _status(database_path: Path) -> int:
                 "roomTypes": len(batch.room_types) if batch else 0,
                 "equipment": len(batch.equipment) if batch else 0,
                 "rooms": len(batch.rooms) if batch else 0,
+                "academicYears": len(batch.academic_years) if batch else 0,
+                "calendarPeriods": len(batch.calendar_periods) if batch else 0,
+                "bellSlots": len(batch.bell_slots) if batch else 0,
             },
             "versions": [
                 {

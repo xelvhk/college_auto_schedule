@@ -7,7 +7,10 @@ from contextlib import closing
 from pathlib import Path
 
 from rasp.domain.models import (
+    AcademicYear,
+    BellSlot,
     Building,
+    CalendarPeriod,
     Curriculum,
     CurriculumDiscipline,
     Equipment,
@@ -130,6 +133,34 @@ def make_full_batch() -> ImportBatch:
                     equipment_codes=("COMPUTERS",),
                 ),
             ),
+            "academic_years": (
+                AcademicYear(
+                    academic_year="2026/2027",
+                    starts_on="2026-09-01",
+                    ends_on="2027-06-30",
+                ),
+            ),
+            "calendar_periods": (
+                CalendarPeriod(
+                    period_code="SEM-1",
+                    academic_year="2026/2027",
+                    period_name="Первый семестр",
+                    period_type="teaching",
+                    starts_on="2026-09-01",
+                    ends_on="2026-12-28",
+                    semester=1,
+                ),
+            ),
+            "bell_slots": (
+                BellSlot(
+                    slot_code="S1-01",
+                    academic_year="2026/2027",
+                    shift_code="S1",
+                    lesson_number=1,
+                    starts_at="08:30",
+                    ends_at="10:00",
+                ),
+            ),
         }
     )
 
@@ -174,6 +205,9 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(receipt.room_type_count, 1)
         self.assertEqual(receipt.equipment_count, 1)
         self.assertEqual(receipt.room_count, 1)
+        self.assertEqual(len(restored.academic_years), 1)
+        self.assertEqual(len(restored.calendar_periods), 1)
+        self.assertEqual(len(restored.bell_slots), 1)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
@@ -349,7 +383,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 5)
+        self.assertEqual(version, 6)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

@@ -63,6 +63,9 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["students"], 1)
         self.assertEqual(payload["counts"]["buildings"], 1)
         self.assertEqual(payload["counts"]["rooms"], 1)
+        self.assertEqual(payload["counts"]["academicYears"], 1)
+        self.assertEqual(payload["counts"]["calendarPeriods"], 1)
+        self.assertEqual(payload["counts"]["bellSlots"], 1)
         self.assertEqual(payload["studentChanges"]["created"], 1)
         self.assertEqual(payload["roomDeficits"], [])
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
@@ -87,6 +90,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status.json()["counts"]["disciplines"], 1)
         self.assertEqual(status.json()["counts"]["students"], 1)
         self.assertEqual(status.json()["counts"]["rooms"], 1)
+        self.assertEqual(status.json()["counts"]["academicYears"], 1)
 
     def test_preview_reports_workload_without_matching_room(self) -> None:
         source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
