@@ -8,6 +8,7 @@ from rasp.application.readiness import (
     analyze_schedule_readiness,
 )
 from rasp.domain.models import (
+    AcademicCycle,
     AcademicYear,
     BellSlot,
     Building,
@@ -296,6 +297,31 @@ class CurriculumReadinessTests(unittest.TestCase):
 
 
 class ScheduleReadinessTests(unittest.TestCase):
+    def test_inactive_cycle_blocks_cyclic_workload(self) -> None:
+        batch = make_ready_batch()
+        workload = batch.workloads[0].model_copy(
+            update={
+                "cycle_code": "NUMERATOR-DENOMINATOR",
+                "cycle_week_numbers": (1,),
+            }
+        )
+        cycle = AcademicCycle(
+            cycle_code="NUMERATOR-DENOMINATOR",
+            academic_year="2026/2027",
+            cycle_name="Числитель / знаменатель",
+            cycle_length_weeks=2,
+            anchor_date="2026-09-01",
+            active=False,
+        )
+
+        report = analyze_schedule_readiness(
+            batch.model_copy(
+                update={"workloads": (workload,), "academic_cycles": (cycle,)}
+            )
+        )
+
+        self.assertIn("inactive_workload_cycle", {issue.code for issue in report.issues})
+
     def test_complete_batch_is_ready(self) -> None:
         report = analyze_schedule_readiness(make_ready_batch())
 

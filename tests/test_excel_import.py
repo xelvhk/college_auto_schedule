@@ -30,6 +30,33 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class DomainModelTests(unittest.TestCase):
+    def test_workload_normalizes_cycle_week_numbers(self) -> None:
+        workload = WorkloadItem(
+            workload_row_code="W-001",
+            academic_year="2026/2027",
+            semester=1,
+            discipline_code="MDK.01.01",
+            discipline_name="Основы программирования",
+            group_code="ИС-101",
+            teacher_code="T-001",
+            lesson_type="practice",
+            total_academic_hours=72,
+            event_duration_hours=2,
+            cycle_code=" numerator-denominator ",
+            cycle_week_numbers="2;1;2",
+        )
+
+        self.assertEqual(workload.cycle_code, "NUMERATOR-DENOMINATOR")
+        self.assertEqual(workload.cycle_week_numbers, (1, 2))
+
+        with self.assertRaises(ValidationError):
+            WorkloadItem(
+                **(
+                    workload.model_dump()
+                    | {"cycle_code": None, "cycle_week_numbers": (1,)}
+                )
+            )
+
     def test_teacher_rejects_impossible_daily_limit(self) -> None:
         with self.assertRaises(ValidationError):
             Teacher(
@@ -289,6 +316,70 @@ class ImportBatchTests(unittest.TestCase):
             {issue.code for issue in raised.exception.issues},
         )
 
+    def test_validates_workload_academic_cycle(self) -> None:
+        calendar = {
+            "academic_year_rows": [{
+                "academic_year": "2026/2027",
+                "starts_on": "2026-09-01",
+                "ends_on": "2027-06-30",
+            }],
+            "calendar_period_rows": [],
+            "bell_slot_rows": [],
+            "academic_cycle_rows": [{
+                "cycle_code": "NUMERATOR-DENOMINATOR",
+                "academic_year": "2026/2027",
+                "cycle_name": "Числитель / знаменатель",
+                "cycle_length_weeks": 2,
+                "anchor_date": "2026-09-01",
+            }],
+        }
+        workload = self.workload_rows[0] | {
+            "cycle_code": "NUMERATOR-DENOMINATOR",
+            "cycle_week_numbers": "1",
+        }
+
+        batch = build_import_batch(
+            teacher_rows=self.teacher_rows,
+            group_rows=self.group_rows,
+            workload_rows=[workload],
+            **calendar,
+        )
+        self.assertEqual(batch.academic_cycles[0].cycle_length_weeks, 2)
+        self.assertEqual(batch.workloads[0].cycle_week_numbers, (1,))
+
+        invalid = workload | {"cycle_week_numbers": "3"}
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(
+                teacher_rows=self.teacher_rows,
+                group_rows=self.group_rows,
+                workload_rows=[invalid],
+                **calendar,
+            )
+        self.assertIn(
+            "cycle_week_out_of_range",
+            {issue.code for issue in raised.exception.issues},
+        )
+
+    def test_academic_cycle_requires_base_calendar(self) -> None:
+        with self.assertRaises(ImportValidationError) as raised:
+            build_import_batch(
+                teacher_rows=self.teacher_rows,
+                group_rows=self.group_rows,
+                workload_rows=self.workload_rows,
+                academic_cycle_rows=[{
+                    "cycle_code": "NUMERATOR-DENOMINATOR",
+                    "academic_year": "2026/2027",
+                    "cycle_name": "Числитель / знаменатель",
+                    "cycle_length_weeks": 2,
+                    "anchor_date": "2026-09-01",
+                }],
+            )
+
+        self.assertIn(
+            "incomplete_calendar_data",
+            {issue.code for issue in raised.exception.issues},
+        )
+
 
 class WorkbookImportTests(unittest.TestCase):
     def test_canonical_workbook_uses_russian_headers(self) -> None:
@@ -311,6 +402,10 @@ class WorkbookImportTests(unittest.TestCase):
             self.assertEqual(
                 workbook["Недоступность"]["D1"].value,
                 "Код ресурса",
+            )
+            self.assertEqual(
+                workbook["Учебные циклы"]["D1"].value,
+                "Длина цикла в неделях",
             )
         finally:
             workbook.close()
@@ -339,6 +434,23 @@ class WorkbookImportTests(unittest.TestCase):
             batch.resource_unavailability[0].unavailability_code,
             "U-001",
         )
+        self.assertEqual(batch.academic_cycles[0].cycle_code, "NUMERATOR-DENOMINATOR")
+
+    def test_legacy_calendar_without_academic_cycles_remains_supported(self) -> None:
+        workbook = load_workbook(FIXTURES / "valid-import.xlsx")
+        del workbook["Учебные циклы"]
+        workloads = workbook["Нагрузка"]
+        workloads.delete_cols(18, 2)
+
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "legacy-no-cycles.xlsx"
+            workbook.save(target)
+            workbook.close()
+            batch = read_import_workbook(target)
+
+        self.assertEqual(batch.academic_cycles, ())
+        self.assertIsNone(batch.workloads[0].cycle_code)
+        self.assertEqual(batch.workloads[0].cycle_week_numbers, ())
 
     def test_legacy_calendar_without_constraint_sheets_remains_supported(self) -> None:
         workbook = load_workbook(FIXTURES / "valid-import.xlsx")

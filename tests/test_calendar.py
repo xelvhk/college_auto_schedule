@@ -1,20 +1,77 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from pydantic import ValidationError
 
+from rasp.application.cycles import cycle_week_number, workload_applies_on_date
 from rasp.domain.models import (
+    AcademicCycle,
     AcademicYear,
     BellSlot,
     CalendarException,
     CalendarPeriod,
     ResourceUnavailability,
+    WorkloadItem,
 )
 from rasp.imports.calendar import CalendarValidationError, build_calendar_batch
 
 
 class CalendarDomainTests(unittest.TestCase):
+    def test_cycle_week_number_uses_monday_of_anchor_week(self) -> None:
+        cycle = AcademicCycle(
+            cycle_code="NUMERATOR-DENOMINATOR",
+            academic_year="2026/2027",
+            cycle_name="Числитель / знаменатель",
+            cycle_length_weeks=2,
+            anchor_date="2026-09-01",
+        )
+
+        self.assertEqual(cycle_week_number(cycle, date(2026, 9, 2)), 1)
+        self.assertEqual(cycle_week_number(cycle, date(2026, 9, 7)), 2)
+        self.assertEqual(cycle_week_number(cycle, date(2026, 9, 14)), 1)
+
+    def test_workload_applies_only_to_selected_cycle_positions(self) -> None:
+        cycle = AcademicCycle(
+            cycle_code="THREE-WEEK",
+            academic_year="2026/2027",
+            cycle_name="Трёхнедельный цикл",
+            cycle_length_weeks=3,
+            anchor_date="2026-09-01",
+        )
+        workload = WorkloadItem(
+            workload_row_code="W-001",
+            academic_year="2026/2027",
+            semester=1,
+            discipline_code="MDK.01.01",
+            discipline_name="Основы программирования",
+            group_code="ИС-101",
+            teacher_code="T-001",
+            lesson_type="practice",
+            total_academic_hours=72,
+            event_duration_hours=2,
+            cycle_code="THREE-WEEK",
+            cycle_week_numbers=(1, 3),
+        )
+
+        self.assertTrue(workload_applies_on_date(workload, date(2026, 9, 2), cycle))
+        self.assertFalse(workload_applies_on_date(workload, date(2026, 9, 7), cycle))
+        self.assertTrue(workload_applies_on_date(workload, date(2026, 9, 14), cycle))
+
+    def test_academic_cycle_normalizes_code_and_bounds_length(self) -> None:
+        cycle = AcademicCycle(
+            cycle_code=" numerator-denominator ",
+            academic_year="2026/2027",
+            cycle_name="Числитель / знаменатель",
+            cycle_length_weeks=2,
+            anchor_date="2026-09-01",
+        )
+
+        self.assertEqual(cycle.cycle_code, "NUMERATOR-DENOMINATOR")
+        with self.assertRaises(ValidationError):
+            AcademicCycle(**(cycle.model_dump() | {"cycle_length_weeks": 53}))
+
     def test_academic_year_requires_ordered_dates_matching_its_code(self) -> None:
         year = AcademicYear(
             academic_year="2026/2027",

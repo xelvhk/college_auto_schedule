@@ -331,6 +331,7 @@ def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
         if period.semester is not None
     }
     bell_slot_years = {slot.academic_year for slot in imports.bell_slots}
+    cycles = {cycle.cycle_code: cycle for cycle in imports.academic_cycles}
     for workload in imports.workloads:
         teacher = teachers.get(workload.teacher_code)
         academic_year = academic_years.get(workload.academic_year)
@@ -371,6 +372,20 @@ def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
                         object_code=workload.workload_row_code,
                         group_code=workload.group_code,
                         remediation=remediation,
+                    )
+                )
+        if workload.cycle_code is not None:
+            cycle = cycles.get(workload.cycle_code)
+            if cycle is None or not cycle.active:
+                issues.append(
+                    ReadinessIssue(
+                        severity=ReadinessSeverity.ERROR,
+                        code="inactive_workload_cycle",
+                        message="Учебный цикл нагрузки отсутствует или неактивен",
+                        section="academic_cycles",
+                        object_code=workload.workload_row_code,
+                        group_code=workload.group_code,
+                        remediation="Добавьте или активируйте выбранный учебный цикл.",
                     )
                 )
 

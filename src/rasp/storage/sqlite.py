@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from rasp.domain.models import (
+    AcademicCycle,
     AcademicYear,
     BellSlot,
     Building,
@@ -31,7 +32,7 @@ from rasp.domain.models import (
 )
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -226,6 +227,20 @@ CREATE TABLE IF NOT EXISTS academic_years (
         ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS academic_cycles (
+    import_version_id INTEGER NOT NULL,
+    cycle_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    cycle_name TEXT NOT NULL,
+    cycle_length_weeks INTEGER NOT NULL CHECK(cycle_length_weeks BETWEEN 1 AND 52),
+    anchor_date TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, cycle_code),
+    FOREIGN KEY (import_version_id, academic_year)
+        REFERENCES academic_years(import_version_id, academic_year)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
 CREATE TABLE IF NOT EXISTS calendar_periods (
     import_version_id INTEGER NOT NULL,
     period_code TEXT NOT NULL,
@@ -302,6 +317,8 @@ CREATE TABLE IF NOT EXISTS workload_items (
     total_academic_hours INTEGER NOT NULL,
     event_duration_hours INTEGER NOT NULL,
     recurrence TEXT,
+    cycle_code TEXT,
+    cycle_week_numbers TEXT NOT NULL DEFAULT '',
     lesson_bundle_code TEXT,
     room_type TEXT,
     room_capacity INTEGER,
@@ -348,6 +365,7 @@ class ImportReceipt:
     bell_slot_count: int
     calendar_exception_count: int
     resource_unavailability_count: int
+    academic_cycle_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,6 +421,15 @@ class SqliteImportRepository:
                     connection.execute(
                         "ALTER TABLE workload_items "
                         "ADD COLUMN required_equipment_codes TEXT NOT NULL DEFAULT ''"
+                    )
+                if "cycle_code" not in workload_columns:
+                    connection.execute(
+                        "ALTER TABLE workload_items ADD COLUMN cycle_code TEXT"
+                    )
+                if "cycle_week_numbers" not in workload_columns:
+                    connection.execute(
+                        "ALTER TABLE workload_items "
+                        "ADD COLUMN cycle_week_numbers TEXT NOT NULL DEFAULT ''"
                     )
                 if current_version < SCHEMA_VERSION:
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -470,6 +497,7 @@ class SqliteImportRepository:
                     resource_unavailability_count = len(
                         batch.resource_unavailability
                     )
+                    academic_cycle_count = len(batch.academic_cycles)
 
                 if existing is not None:
                     (
@@ -489,6 +517,7 @@ class SqliteImportRepository:
                         bell_slot_count,
                         calendar_exception_count,
                         resource_unavailability_count,
+                        academic_cycle_count,
                     ) = counts
 
                 connection.execute(
@@ -522,6 +551,7 @@ class SqliteImportRepository:
             bell_slot_count=bell_slot_count,
             calendar_exception_count=calendar_exception_count,
             resource_unavailability_count=resource_unavailability_count,
+            academic_cycle_count=academic_cycle_count,
         )
 
     @staticmethod
@@ -588,6 +618,10 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM resource_unavailability WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
+        academic_cycles = connection.execute(
+            "SELECT COUNT(*) FROM academic_cycles WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -605,6 +639,7 @@ class SqliteImportRepository:
             int(bell_slots),
             int(calendar_exceptions),
             int(resource_unavailability),
+            int(academic_cycles),
         )
 
     def _insert_batch(
@@ -624,6 +659,21 @@ class SqliteImportRepository:
                     int(item.active),
                 )
                 for item in batch.academic_years
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO academic_cycles VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id,
+                    item.cycle_code,
+                    item.academic_year,
+                    item.cycle_name,
+                    item.cycle_length_weeks,
+                    item.anchor_date.isoformat(),
+                    int(item.active),
+                )
+                for item in batch.academic_cycles
             ],
         )
         connection.executemany(
@@ -888,8 +938,15 @@ class SqliteImportRepository:
         )
         connection.executemany(
             """
-            INSERT INTO workload_items VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            INSERT INTO workload_items (
+                import_version_id, workload_row_code, academic_year, semester,
+                discipline_code, discipline_name, group_code, subgroup, stream,
+                teacher_code, lesson_type, total_academic_hours,
+                event_duration_hours, recurrence, cycle_code, cycle_week_numbers,
+                lesson_bundle_code, room_type, room_capacity,
+                required_equipment_codes
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             [
@@ -908,6 +965,8 @@ class SqliteImportRepository:
                     item.total_academic_hours,
                     item.event_duration_hours,
                     item.recurrence,
+                    item.cycle_code,
+                    ";".join(str(number) for number in item.cycle_week_numbers),
                     item.lesson_bundle_code,
                     item.room_type,
                     item.room_capacity,
@@ -1062,6 +1121,11 @@ class SqliteImportRepository:
                     "SELECT * FROM academic_years WHERE import_version_id = ? ORDER BY academic_year",
                     (version_id,),
                 ).fetchall()
+                academic_cycle_rows = connection.execute(
+                    "SELECT * FROM academic_cycles "
+                    "WHERE import_version_id = ? ORDER BY cycle_code",
+                    (version_id,),
+                ).fetchall()
                 calendar_period_rows = connection.execute(
                     "SELECT * FROM calendar_periods WHERE import_version_id = ? ORDER BY period_code",
                     (version_id,),
@@ -1106,6 +1170,9 @@ class SqliteImportRepository:
                 rooms=tuple(self._room_from_row(row) for row in room_rows),
                 academic_years=tuple(
                     self._academic_year_from_row(row) for row in academic_year_rows
+                ),
+                academic_cycles=tuple(
+                    self._academic_cycle_from_row(row) for row in academic_cycle_rows
                 ),
                 calendar_periods=tuple(
                     self._calendar_period_from_row(row) for row in calendar_period_rows
@@ -1171,10 +1238,23 @@ class SqliteImportRepository:
             total_academic_hours=row["total_academic_hours"],
             event_duration_hours=row["event_duration_hours"],
             recurrence=row["recurrence"],
+            cycle_code=row["cycle_code"],
+            cycle_week_numbers=row["cycle_week_numbers"],
             lesson_bundle_code=row["lesson_bundle_code"],
             room_type=row["room_type"],
             room_capacity=row["room_capacity"],
             required_equipment_codes=row["required_equipment_codes"],
+        )
+
+    @staticmethod
+    def _academic_cycle_from_row(row: sqlite3.Row) -> AcademicCycle:
+        return AcademicCycle(
+            cycle_code=row["cycle_code"],
+            academic_year=row["academic_year"],
+            cycle_name=row["cycle_name"],
+            cycle_length_weeks=row["cycle_length_weeks"],
+            anchor_date=row["anchor_date"],
+            active=bool(row["active"]),
         )
 
     @staticmethod

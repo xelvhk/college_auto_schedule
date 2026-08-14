@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 
 from rasp.domain.models import (
+    AcademicCycle,
     AcademicYear,
     BellSlot,
     Building,
@@ -63,6 +64,14 @@ def make_full_batch() -> ImportBatch:
     base = make_batch()
     return base.model_copy(
         update={
+            "workloads": (
+                base.workloads[0].model_copy(
+                    update={
+                        "cycle_code": "NUMERATOR-DENOMINATOR",
+                        "cycle_week_numbers": (1,),
+                    }
+                ),
+            ),
             "groups": (
                 base.groups[0].model_copy(
                     update={
@@ -140,6 +149,15 @@ def make_full_batch() -> ImportBatch:
                     academic_year="2026/2027",
                     starts_on="2026-09-01",
                     ends_on="2027-06-30",
+                ),
+            ),
+            "academic_cycles": (
+                AcademicCycle(
+                    cycle_code="NUMERATOR-DENOMINATOR",
+                    academic_year="2026/2027",
+                    cycle_name="Числитель / знаменатель",
+                    cycle_length_weeks=2,
+                    anchor_date="2026-09-01",
                 ),
             ),
             "calendar_periods": (
@@ -232,6 +250,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(len(restored.bell_slots), 1)
         self.assertEqual(receipt.calendar_exception_count, 1)
         self.assertEqual(receipt.resource_unavailability_count, 1)
+        self.assertEqual(receipt.academic_cycle_count, 1)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
@@ -407,7 +426,52 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 7)
+        self.assertEqual(version, 8)
+
+    def test_migrates_legacy_workload_table_with_weekly_defaults(self) -> None:
+        legacy_database = Path(self.temporary_directory.name) / "legacy-workload.sqlite3"
+        with closing(sqlite3.connect(legacy_database)) as connection, connection:
+            connection.executescript(
+                """
+                PRAGMA user_version = 7;
+                CREATE TABLE workload_items (
+                    import_version_id INTEGER NOT NULL,
+                    workload_row_code TEXT NOT NULL,
+                    academic_year TEXT NOT NULL,
+                    semester INTEGER NOT NULL,
+                    discipline_code TEXT NOT NULL,
+                    discipline_name TEXT NOT NULL,
+                    group_code TEXT NOT NULL,
+                    subgroup TEXT,
+                    stream TEXT,
+                    teacher_code TEXT NOT NULL,
+                    lesson_type TEXT NOT NULL,
+                    total_academic_hours INTEGER NOT NULL,
+                    event_duration_hours INTEGER NOT NULL,
+                    recurrence TEXT,
+                    lesson_bundle_code TEXT,
+                    room_type TEXT,
+                    room_capacity INTEGER,
+                    required_equipment_codes TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (import_version_id, workload_row_code)
+                );
+                """
+            )
+
+        SqliteImportRepository(legacy_database).initialize()
+
+        with closing(sqlite3.connect(legacy_database)) as connection:
+            columns = {
+                row[1]: row for row in connection.execute(
+                    "PRAGMA table_info(workload_items)"
+                ).fetchall()
+            }
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertIn("cycle_code", columns)
+        self.assertIn("cycle_week_numbers", columns)
+        self.assertEqual(columns["cycle_week_numbers"][4], "''")
+        self.assertEqual(version, 8)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

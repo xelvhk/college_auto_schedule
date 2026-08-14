@@ -71,6 +71,8 @@ const russianHeaders = {
   room_type: "Тип помещения",
   room_capacity: "Требуемая вместимость",
   required_equipment_codes: "Требуемое оборудование",
+  cycle_code: "Код учебного цикла",
+  cycle_week_numbers: "Номера недель цикла",
   starts_on: "Дата начала",
   ends_on: "Дата окончания",
   period_code: "Код периода",
@@ -91,6 +93,9 @@ const russianHeaders = {
   resource_type: "Тип ресурса",
   resource_code: "Код ресурса",
   reason: "Причина",
+  cycle_name: "Название цикла",
+  cycle_length_weeks: "Длина цикла в неделях",
+  anchor_date: "Дата начала отсчёта",
 };
 const sheets = [
   {
@@ -289,6 +294,8 @@ const sheets = [
       "room_type",
       "room_capacity",
       "required_equipment_codes",
+      "cycle_code",
+      "cycle_week_numbers",
     ],
     example: [
       "W-001",
@@ -308,6 +315,8 @@ const sheets = [
       "computer_lab",
       25,
       "COMPUTERS",
+      "NUMERATOR-DENOMINATOR",
+      "1",
     ],
   },
   {
@@ -317,6 +326,25 @@ const sheets = [
       "2026/2027",
       new Date("2026-09-01T00:00:00Z"),
       new Date("2027-06-30T00:00:00Z"),
+      true,
+    ],
+  },
+  {
+    name: "Учебные циклы",
+    headers: [
+      "cycle_code",
+      "academic_year",
+      "cycle_name",
+      "cycle_length_weeks",
+      "anchor_date",
+      "active",
+    ],
+    example: [
+      "NUMERATOR-DENOMINATOR",
+      "2026/2027",
+      "Числитель / знаменатель",
+      2,
+      new Date("2026-09-01T00:00:00Z"),
       true,
     ],
   },
@@ -402,6 +430,9 @@ const sheets = [
 ];
 
 function localizedHeader(sheetName, header) {
+  if (sheetName === "Учебные циклы" && header === "cycle_code") {
+    return "Код цикла";
+  }
   if (sheetName === "Недоступность" && header === "starts_at") {
     return "Время начала";
   }
@@ -449,6 +480,10 @@ workbook.worksheets
 workbook.worksheets
   .getItem("Учебные годы")
   .getRange("B2:C2")
+  .setNumberFormat("yyyy-mm-dd");
+workbook.worksheets
+  .getItem("Учебные циклы")
+  .getRange("E2")
   .setNumberFormat("yyyy-mm-dd");
 workbook.worksheets
   .getItem("Периоды")
@@ -500,3 +535,20 @@ const inspection = await workbook.inspect({
   options: { maxResults: 100 },
 });
 console.log(inspection.ndjson);
+
+const cycleInspection = await workbook.inspect({
+  kind: "table",
+  range: "Учебные циклы!A1:F2",
+  include: "values,formulas",
+  tableMaxRows: 2,
+  tableMaxCols: 6,
+});
+console.log(cycleInspection.ndjson);
+
+const formulaErrors = await workbook.inspect({
+  kind: "match",
+  searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A",
+  options: { useRegex: true, maxResults: 100 },
+  summary: "final formula error scan",
+});
+console.log(formulaErrors.ndjson);

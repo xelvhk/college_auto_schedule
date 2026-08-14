@@ -26,6 +26,7 @@ const elements = {
   buildingCount: document.querySelector("#building-count"),
   roomCount: document.querySelector("#room-count"),
   academicYearCount: document.querySelector("#academic-year-count"),
+  academicCycleCount: document.querySelector("#academic-cycle-count"),
   calendarPeriodCount: document.querySelector("#calendar-period-count"),
   bellSlotCount: document.querySelector("#bell-slot-count"),
   calendarExceptionCount: document.querySelector("#calendar-exception-count"),
@@ -184,6 +185,7 @@ async function previewFile() {
     elements.buildingCount.textContent = payload.counts.buildings;
     elements.roomCount.textContent = payload.counts.rooms;
     elements.academicYearCount.textContent = payload.counts.academicYears;
+    elements.academicCycleCount.textContent = payload.counts.academicCycles;
     elements.calendarPeriodCount.textContent = payload.counts.calendarPeriods;
     elements.bellSlotCount.textContent = payload.counts.bellSlots;
     elements.calendarExceptionCount.textContent = payload.counts.calendarExceptions;

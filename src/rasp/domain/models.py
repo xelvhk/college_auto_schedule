@@ -223,6 +223,22 @@ class AcademicYear(DomainModel):
         return self
 
 
+class AcademicCycle(DomainModel):
+    cycle_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    cycle_name: ShortText
+    cycle_length_weeks: int = Field(ge=1, le=52)
+    anchor_date: date
+    active: bool = True
+
+    @field_validator("cycle_code")
+    @classmethod
+    def normalize_cycle_code(cls, value: str) -> str:
+        return value.upper()
+
+
 class CalendarPeriod(DomainModel):
     period_code: Code
     academic_year: Annotated[
@@ -457,6 +473,8 @@ class WorkloadItem(DomainModel):
     total_academic_hours: PositiveInt
     event_duration_hours: PositiveInt = Field(le=8)
     recurrence: str | None = Field(default=None, max_length=64)
+    cycle_code: Code | None = None
+    cycle_week_numbers: tuple[int, ...] = ()
     lesson_bundle_code: Code | None = None
     room_type: str | None = Field(default=None, max_length=64)
     room_capacity: int | None = Field(default=None, gt=0)
@@ -469,6 +487,7 @@ class WorkloadItem(DomainModel):
         "teacher_code",
         "lesson_bundle_code",
         "room_type",
+        "cycle_code",
     )
     @classmethod
     def normalize_codes(cls, value: str | None) -> str | None:
@@ -485,12 +504,29 @@ class WorkloadItem(DomainModel):
             return tuple(sorted({str(part).strip().upper() for part in value}))
         return value
 
+    @field_validator("cycle_week_numbers", mode="before")
+    @classmethod
+    def parse_cycle_week_numbers(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = tuple(part.strip() for part in value.split(";") if part.strip())
+        if isinstance(value, (tuple, list)):
+            return tuple(sorted({int(part) for part in value}))
+        return value
+
     @model_validator(mode="after")
     def hours_form_whole_events(self) -> WorkloadItem:
         if self.total_academic_hours % self.event_duration_hours:
             raise ValueError(
                 "total_academic_hours must be divisible by event_duration_hours"
             )
+        if self.cycle_code is None and self.cycle_week_numbers:
+            raise ValueError("cycle_week_numbers require cycle_code")
+        if self.cycle_code is not None and not self.cycle_week_numbers:
+            raise ValueError("cycle_code requires cycle_week_numbers")
+        if any(number < 1 or number > 52 for number in self.cycle_week_numbers):
+            raise ValueError("cycle_week_numbers must be between 1 and 52")
         return self
 
 
@@ -507,6 +543,7 @@ class ImportBatch(DomainModel):
     equipment: tuple[Equipment, ...] = ()
     rooms: tuple[Room, ...] = ()
     academic_years: tuple[AcademicYear, ...] = ()
+    academic_cycles: tuple[AcademicCycle, ...] = ()
     calendar_periods: tuple[CalendarPeriod, ...] = ()
     bell_slots: tuple[BellSlot, ...] = ()
     calendar_exceptions: tuple[CalendarException, ...] = ()

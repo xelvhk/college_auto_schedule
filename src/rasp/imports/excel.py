@@ -11,6 +11,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, ValidationError
 
 from rasp.domain.models import (
+    AcademicCycle,
     Building,
     Equipment,
     Group,
@@ -78,6 +79,7 @@ CALENDAR_CONSTRAINT_SHEETS = {
     "Исключения календаря": "calendar_exceptions",
     "Недоступность": "resource_unavailability",
 }
+ACADEMIC_CYCLE_SHEETS = {"Учебные циклы": "academic_cycles"}
 RUSSIAN_HEADERS = {
     "Преподаватели": {
         "teacher_code": "Код преподавателя",
@@ -182,11 +184,21 @@ RUSSIAN_HEADERS = {
         "room_type": "Тип помещения",
         "room_capacity": "Требуемая вместимость",
         "required_equipment_codes": "Требуемое оборудование",
+        "cycle_code": "Код учебного цикла",
+        "cycle_week_numbers": "Номера недель цикла",
     },
     "Учебные годы": {
         "academic_year": "Учебный год",
         "starts_on": "Дата начала",
         "ends_on": "Дата окончания",
+        "active": "Активен",
+    },
+    "Учебные циклы": {
+        "cycle_code": "Код цикла",
+        "academic_year": "Учебный год",
+        "cycle_name": "Название цикла",
+        "cycle_length_weeks": "Длина цикла в неделях",
+        "anchor_date": "Дата начала отсчёта",
         "active": "Активен",
     },
     "Периоды": {
@@ -300,6 +312,10 @@ REQUIRED_HEADERS = {
         "capacity",
     },
     "Учебные годы": {"academic_year", "starts_on", "ends_on"},
+    "Учебные циклы": {
+        "cycle_code", "academic_year", "cycle_name", "cycle_length_weeks",
+        "anchor_date",
+    },
     "Периоды": {
         "period_code", "academic_year", "period_name", "period_type",
         "starts_on", "ends_on",
@@ -386,6 +402,7 @@ def build_import_batch(
     bell_slot_rows: Iterable[Mapping[str, Any]] | None = None,
     calendar_exception_rows: Iterable[Mapping[str, Any]] | None = None,
     resource_unavailability_rows: Iterable[Mapping[str, Any]] | None = None,
+    academic_cycle_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -404,6 +421,7 @@ def build_import_batch(
     room_types: list[RoomType] = []
     equipment: list[Equipment] = []
     rooms: list[Room] = []
+    academic_cycles: list[AcademicCycle] = []
     room_inputs = (building_rows, room_type_rows, equipment_rows, room_rows)
     if any(rows is not None for rows in room_inputs):
         if not all(rows is not None for rows in room_inputs):
@@ -433,6 +451,14 @@ def build_import_batch(
     issues.extend(_duplicate_issues("room_types", room_types, "room_type_code"))
     issues.extend(_duplicate_issues("equipment", equipment, "equipment_code"))
     issues.extend(_duplicate_issues("rooms", rooms, "room_code"))
+    if academic_cycle_rows is not None:
+        academic_cycles, parsed = _parse_rows(
+            "academic_cycles", academic_cycle_rows, AcademicCycle
+        )
+        issues.extend(parsed)
+        issues.extend(
+            _duplicate_issues("academic_cycles", academic_cycles, "cycle_code")
+        )
 
     teacher_codes = {teacher.teacher_code for teacher in teachers}
     group_codes = {group.group_code for group in groups}
@@ -614,7 +640,10 @@ def build_import_batch(
     )
     has_base_calendar = any(rows is not None for rows in base_calendar_inputs)
     has_constraints = any(rows is not None for rows in constraint_inputs)
-    if has_base_calendar or has_constraints:
+    has_cycles = academic_cycle_rows is not None or any(
+        workload.cycle_code is not None for workload in workloads
+    )
+    if has_base_calendar or has_constraints or has_cycles:
         if not all(rows is not None for rows in base_calendar_inputs):
             issues.append(
                 ImportIssue(
@@ -662,6 +691,59 @@ def build_import_batch(
                         "Workload references an unknown academic year",
                     )
                 )
+        academic_years_by_code = {
+            item.academic_year: item for item in calendar.academic_years
+        }
+        cycles_by_code = {item.cycle_code: item for item in academic_cycles}
+        for row_number, cycle in enumerate(academic_cycles, start=2):
+            year = academic_years_by_code.get(cycle.academic_year)
+            if year is None:
+                issues.append(
+                    ImportIssue(
+                        "academic_cycles", row_number, "academic_year",
+                        "unknown_cycle_academic_year",
+                        "Academic cycle references an unknown academic year",
+                    )
+                )
+            elif not year.starts_on <= cycle.anchor_date <= year.ends_on:
+                issues.append(
+                    ImportIssue(
+                        "academic_cycles", row_number, "anchor_date",
+                        "cycle_anchor_outside_academic_year",
+                        "Academic cycle anchor date is outside its academic year",
+                    )
+                )
+        for row_number, workload in enumerate(workloads, start=2):
+            if workload.cycle_code is None:
+                continue
+            cycle = cycles_by_code.get(workload.cycle_code)
+            if cycle is None:
+                issues.append(
+                    ImportIssue(
+                        "workloads", row_number, "cycle_code", "unknown_cycle",
+                        "Workload references an unknown academic cycle",
+                    )
+                )
+                continue
+            if workload.academic_year != cycle.academic_year:
+                issues.append(
+                    ImportIssue(
+                        "workloads", row_number, "cycle_code",
+                        "workload_cycle_academic_year_mismatch",
+                        "Workload and academic cycle belong to different academic years",
+                    )
+                )
+            if any(
+                number > cycle.cycle_length_weeks
+                for number in workload.cycle_week_numbers
+            ):
+                issues.append(
+                    ImportIssue(
+                        "workloads", row_number, "cycle_week_numbers",
+                        "cycle_week_out_of_range",
+                        "Workload cycle week is outside the selected cycle length",
+                    )
+                )
         resource_codes = {
             "teacher": {item.teacher_code for item in teachers},
             "group": {item.group_code for item in groups},
@@ -700,6 +782,7 @@ def build_import_batch(
             "curricula": references.curricula,
             "disciplines": references.disciplines,
             "academic_years": calendar.academic_years if calendar else (),
+            "academic_cycles": tuple(academic_cycles),
             "calendar_periods": calendar.periods if calendar else (),
             "bell_slots": calendar.bell_slots if calendar else (),
             "calendar_exceptions": calendar.exceptions if calendar else (),
@@ -948,6 +1031,7 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         room_sheets_present = set(ROOM_SHEETS) & available_sheets
         calendar_sheets_present = set(CALENDAR_SHEETS) & available_sheets
         constraint_sheets_present = set(CALENDAR_CONSTRAINT_SHEETS) & available_sheets
+        cycle_sheets_present = set(ACADEMIC_CYCLE_SHEETS) & available_sheets
         if reference_sheets_present and reference_sheets_present != set(
             REFERENCE_SHEETS
         ):
@@ -961,6 +1045,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         ):
             missing_sheets |= set(CALENDAR_CONSTRAINT_SHEETS) - available_sheets
         if constraint_sheets_present and not calendar_sheets_present:
+            missing_sheets |= set(CALENDAR_SHEETS) - available_sheets
+        if cycle_sheets_present and not calendar_sheets_present:
             missing_sheets |= set(CALENDAR_SHEETS) - available_sheets
         if missing_sheets:
             raise ImportValidationError(
@@ -988,6 +1074,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             selected_sheets.update(CALENDAR_SHEETS)
         if constraint_sheets_present:
             selected_sheets.update(CALENDAR_CONSTRAINT_SHEETS)
+        if cycle_sheets_present:
+            selected_sheets.update(ACADEMIC_CYCLE_SHEETS)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -1013,6 +1101,7 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             bell_slot_rows=rows.get("bell_slots"),
             calendar_exception_rows=rows.get("calendar_exceptions"),
             resource_unavailability_rows=rows.get("resource_unavailability"),
+            academic_cycle_rows=rows.get("academic_cycles"),
         )
     finally:
         workbook.close()

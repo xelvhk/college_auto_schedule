@@ -46,6 +46,7 @@ class ImportCliTests(unittest.TestCase):
         self.assertEqual(status["counts"]["students"], 1)
         self.assertEqual(status["counts"]["rooms"], 1)
         self.assertEqual(status["counts"]["academicYears"], 1)
+        self.assertEqual(status["counts"]["academicCycles"], 1)
         self.assertEqual(status["counts"]["calendarPeriods"], 1)
         self.assertEqual(status["counts"]["bellSlots"], 1)
         self.assertEqual(status["counts"]["calendarExceptions"], 1)
