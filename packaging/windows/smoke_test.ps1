@@ -44,6 +44,20 @@ try {
         throw "Canonical workbook was not activated by the packaged application."
     }
 
+    $solverRequest = @{
+        mode = "complete"
+        seed = 0
+        timeLimitSeconds = 30
+    } | ConvertTo-Json
+    $solution = Invoke-RestMethod `
+        -Uri "$($lock.url)/api/solver/runs" `
+        -Method Post `
+        -ContentType "application/json" `
+        -Body $solverRequest
+    if ($solution.status -ne "feasible" -or $solution.assignmentCount -ne 36) {
+        throw "Packaged solver did not produce the canonical 36-assignment draft."
+    }
+
     $second = Start-Process -FilePath $executablePath -PassThru -Wait
     if ($second.ExitCode -ne 0) {
         throw "Second launch exited with code $($second.ExitCode)."

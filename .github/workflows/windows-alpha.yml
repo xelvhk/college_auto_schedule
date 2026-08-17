@@ -1,4 +1,4 @@
-name: Windows technical alpha
+name: Windows functional alpha
 
 on:
   push:
@@ -50,7 +50,7 @@ jobs:
           }
           & $iscc packaging/windows/installer.iss
 
-      - name: Install and smoke-test technical alpha
+      - name: Install and smoke-test functional alpha
         shell: pwsh
         run: |
           $installer = Resolve-Path (Get-ChildItem dist/installer/*.exe | Select-Object -First 1)
@@ -68,7 +68,7 @@ jobs:
             ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content dist/installer/SHA256SUMS.txt
 
-      - name: Upload internal alpha installer
+      - name: Upload functional alpha installer
         uses: actions/upload-artifact@v4
         with:
           name: CollegeAutoSchedule-Windows-alpha
