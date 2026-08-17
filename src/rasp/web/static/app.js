@@ -1,4 +1,4 @@
-const state = { file: null, previewValid: false };
+const state = { file: null, previewValid: false, solverReady: false };
 
 const elements = {
   form: document.querySelector("#import-form"),
@@ -46,6 +46,13 @@ const elements = {
   stepFile: document.querySelector("#step-file"),
   stepCheck: document.querySelector("#step-check"),
   stepActivate: document.querySelector("#step-activate"),
+  solveButton: document.querySelector("#solve-button"),
+  solverReadiness: document.querySelector("#solver-readiness"),
+  solverDetail: document.querySelector("#solver-detail"),
+  solverFeedback: document.querySelector("#solver-feedback"),
+  scheduleResult: document.querySelector("#schedule-result"),
+  assignmentCount: document.querySelector("#assignment-count"),
+  scheduleRows: document.querySelector("#schedule-rows"),
 };
 
 function formatSize(bytes) {
@@ -122,11 +129,125 @@ function makeFormData() {
 async function parseResponse(response) {
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload.error?.message || "Файл не прошёл проверку");
+    const error = new Error(payload.error?.message || "Запрос не выполнен");
     error.payload = payload;
     throw error;
   }
   return payload;
+}
+
+function formatLessonDate(value) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    weekday: "short",
+  }).format(new Date(`${value}T00:00:00`));
+}
+
+function setSolverFeedback(kind, content) {
+  elements.solverFeedback.className = `solver-feedback is-${kind}`;
+  elements.solverFeedback.textContent = content;
+  elements.solverFeedback.hidden = false;
+  elements.liveRegion.textContent = content;
+}
+
+function clearSolverResult() {
+  elements.solverFeedback.hidden = true;
+  elements.solverFeedback.textContent = "";
+  elements.scheduleResult.hidden = true;
+  elements.scheduleRows.replaceChildren();
+}
+
+function renderSchedule(payload) {
+  const assignments = [...payload.assignments].sort((left, right) =>
+    left.lessonDate.localeCompare(right.lessonDate) ||
+    left.slotCode.localeCompare(right.slotCode) ||
+    left.groupCode.localeCompare(right.groupCode) ||
+    left.demandCode.localeCompare(right.demandCode)
+  );
+  elements.scheduleRows.replaceChildren();
+  assignments.forEach((assignment) => {
+    const row = document.createElement("tr");
+    [
+      formatLessonDate(assignment.lessonDate),
+      assignment.occupiedSlotCodes.join(" · "),
+      assignment.groupCode,
+      assignment.disciplineCode,
+      assignment.teacherCode,
+      assignment.roomCode,
+    ].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    });
+    elements.scheduleRows.append(row);
+  });
+  elements.assignmentCount.textContent = `${payload.assignmentCount} занятий`;
+  elements.scheduleResult.hidden = false;
+  setSolverFeedback("success", "Черновой вариант рассчитан без конфликтов ресурсов.");
+  elements.scheduleResult.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadSolverProblem(activeVersionId) {
+  clearSolverResult();
+  state.solverReady = false;
+  elements.solveButton.disabled = true;
+  if (!activeVersionId) {
+    elements.solverReadiness.textContent = "Активные данные не выбраны";
+    elements.solverDetail.textContent = "Сначала активируйте проверенный Excel-файл.";
+    return;
+  }
+  elements.solverReadiness.textContent = "Проверяем готовность к расчёту…";
+  elements.solverDetail.textContent = `Активная версия №${activeVersionId}`;
+  try {
+    const response = await fetch("/api/solver/problem");
+    const problem = await parseResponse(response);
+    state.solverReady = problem.isReady;
+    elements.solveButton.disabled = !problem.isReady;
+    elements.solverReadiness.textContent = problem.isReady
+      ? "Данные готовы к расчёту"
+      : "Расчёт заблокирован ошибками данных";
+    elements.solverDetail.textContent = problem.isReady
+      ? `${problem.lessonDemandCount} занятий · ${problem.placementOptionCount} допустимых размещений`
+      : `Ошибок: ${problem.errorCount} · исправьте активную версию Excel`;
+  } catch (error) {
+    elements.solverReadiness.textContent = "Не удалось проверить готовность";
+    elements.solverDetail.textContent = error.message;
+  }
+}
+
+async function runSolver() {
+  if (!state.solverReady) return;
+  clearSolverResult();
+  setBusy(elements.solveButton, true);
+  elements.solverReadiness.textContent = "Идёт расчёт расписания…";
+  elements.solverDetail.textContent = "Подбираем занятия без пересечений ресурсов.";
+  try {
+    const response = await fetch("/api/solver/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "complete", seed: 0, timeLimitSeconds: 30 }),
+    });
+    const payload = await parseResponse(response);
+    if (payload.status === "feasible") {
+      renderSchedule(payload);
+      elements.solverReadiness.textContent = "Расчёт завершён";
+      elements.solverDetail.textContent = `Получено назначений: ${payload.assignmentCount}`;
+      return;
+    }
+    const detail = payload.diagnostics[0]?.message || "Допустимый вариант не найден.";
+    setSolverFeedback("error", detail);
+    elements.solverReadiness.textContent = "Расписание не построено";
+    elements.solverDetail.textContent = "Проверьте ограничения активных данных.";
+  } catch (error) {
+    setSolverFeedback("error", error.message);
+    elements.solverReadiness.textContent = "Ошибка расчёта";
+    elements.solverDetail.textContent = "Повторите запуск после проверки данных.";
+  } finally {
+    setBusy(elements.solveButton, false);
+    elements.solveButton.disabled = !state.solverReady;
+  }
 }
 
 function renderTeacherRows(teachers) {
@@ -298,7 +419,9 @@ function renderStatus(payload) {
 async function loadStatus() {
   try {
     const response = await fetch("/api/status");
-    renderStatus(await parseResponse(response));
+    const payload = await parseResponse(response);
+    renderStatus(payload);
+    await loadSolverProblem(payload.activeVersionId);
   } catch (error) {
     elements.systemState.className = "system-state is-error";
     elements.systemState.querySelector("span:last-child").textContent = "Хранилище недоступно";
@@ -328,6 +451,7 @@ elements.form.addEventListener("submit", (event) => {
 });
 elements.activateButton.addEventListener("click", activateFile);
 elements.refreshStatus.addEventListener("click", loadStatus);
+elements.solveButton.addEventListener("click", runSolver);
 
 ["dragenter", "dragover"].forEach((eventName) => {
   elements.uploadZone.addEventListener(eventName, (event) => {

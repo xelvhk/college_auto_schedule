@@ -199,6 +199,65 @@
           </div>
         </aside>
       </div>
+
+      <section class="solver-workspace" aria-labelledby="solver-title">
+        <div class="solver-heading">
+          <div>
+            <p class="eyebrow">Активная версия данных</p>
+            <h2 id="solver-title">Расчёт расписания</h2>
+            <p>
+              Постройте первый допустимый вариант без одновременной занятости
+              групп, преподавателей и аудиторий.
+            </p>
+          </div>
+          <span class="draft-badge">Черновик</span>
+        </div>
+
+        <div class="solver-controls">
+          <div>
+            <strong id="solver-readiness">Активные данные не выбраны</strong>
+            <small id="solver-detail">Сначала активируйте проверенный Excel-файл.</small>
+          </div>
+          <button class="button button-primary" id="solve-button" type="button" disabled>
+            Рассчитать расписание
+          </button>
+        </div>
+
+        <div class="solver-feedback" id="solver-feedback" role="alert" hidden></div>
+        <section id="schedule-result" aria-labelledby="schedule-title" hidden>
+          <div class="schedule-summary">
+            <div>
+              <p class="eyebrow">Результат расчёта</p>
+              <h3 id="schedule-title">Черновой вариант расписания</h3>
+            </div>
+            <strong id="assignment-count">0 занятий</strong>
+          </div>
+          <p class="draft-note">
+            Этот вариант ещё не оптимизирован по окнам и равномерности нагрузки
+            и не сохранён как версия расписания.
+          </p>
+          <div
+            class="table-wrap schedule-table-wrap"
+            role="region"
+            aria-label="Черновое расписание, таблицу можно прокручивать"
+            tabindex="0"
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Дата</th>
+                  <th scope="col">Интервал</th>
+                  <th scope="col">Группа</th>
+                  <th scope="col">Дисциплина</th>
+                  <th scope="col">Преподаватель</th>
+                  <th scope="col">Аудитория</th>
+                </tr>
+              </thead>
+              <tbody id="schedule-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </main>
 
     <footer>

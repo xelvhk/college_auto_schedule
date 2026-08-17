@@ -12,7 +12,15 @@ from rasp.application.imports import (
 from rasp.application.readiness import ReadinessIssue, analyze_schedule_readiness
 from rasp.domain.models import ImportBatch
 from rasp.imports.excel import ImportValidationError, read_import_workbook
-from rasp.solver import build_solver_problem, solver_problem_payload
+from rasp.solver import (
+    CpSatScheduleSolver,
+    MAX_SOLVER_SEED,
+    SolverOptions,
+    SolverStatus,
+    build_solver_problem,
+    solver_problem_payload,
+    solver_result_payload,
+)
 from rasp.storage.sqlite import (
     SqliteImportRepository,
     StorageError,
@@ -21,6 +29,15 @@ from rasp.storage.sqlite import (
 
 
 DEFAULT_DATABASE = Path("data/rasp.sqlite3")
+
+
+def _solver_seed(value: str) -> int:
+    seed = int(value)
+    if not 0 <= seed <= MAX_SOLVER_SEED:
+        raise argparse.ArgumentTypeError(
+            f"seed должен быть от 0 до {MAX_SOLVER_SEED}"
+        )
+    return seed
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,6 +60,10 @@ def _parser() -> argparse.ArgumentParser:
         "solver-problem", help="подготовить задачу для расчёта расписания"
     )
     solver_problem.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    solve = subparsers.add_parser("solve", help="рассчитать черновик расписания")
+    solve.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    solve.add_argument("--seed", type=_solver_seed, default=0)
+    solve.add_argument("--time-limit", type=int, default=30, choices=range(1, 301))
     activate_version = subparsers.add_parser(
         "activate-version", help="вернуться к сохраненной версии данных"
     )
@@ -320,6 +341,36 @@ def _solver_problem(database_path: Path) -> int:
     return 0
 
 
+def _solve(database_path: Path, seed: int, time_limit: int) -> int:
+    repository = SqliteImportRepository(database_path)
+    try:
+        repository.initialize()
+        batch = repository.get_active_batch()
+    except StorageError as error:
+        _print_json(
+            {"valid": False, "error": {"code": "storage_error", "message": str(error)}}
+        )
+        return 3
+    if batch is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": {
+                    "code": "no_active_import",
+                    "message": "No active import version",
+                },
+            }
+        )
+        return 5
+    problem = build_solver_problem(batch)
+    result = CpSatScheduleSolver().solve(
+        problem,
+        SolverOptions(seed=seed, time_limit_seconds=time_limit),
+    )
+    _print_json(solver_result_payload(result, problem))
+    return 0 if result.status is SolverStatus.FEASIBLE else 6
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "validate":
@@ -332,6 +383,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _readiness(arguments.database)
     if arguments.command == "solver-problem":
         return _solver_problem(arguments.database)
+    if arguments.command == "solve":
+        return _solve(arguments.database, arguments.seed, arguments.time_limit)
     if arguments.command == "activate-version":
         return _activate_version(arguments.version_id, arguments.database)
     raise AssertionError(f"Unhandled command: {arguments.command}")

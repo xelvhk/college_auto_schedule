@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rasp.application.imports import (
@@ -28,7 +29,15 @@ from rasp.imports.excel import (
     ImportValidationError,
     read_import_workbook,
 )
-from rasp.solver import build_solver_problem, solver_problem_payload
+from rasp.solver import (
+    CpSatScheduleSolver,
+    MAX_SOLVER_SEED,
+    SolverMode,
+    SolverOptions,
+    build_solver_problem,
+    solver_problem_payload,
+    solver_result_payload,
+)
 from rasp.storage.sqlite import (
     SqliteImportRepository,
     StorageError,
@@ -47,6 +56,19 @@ class ApiError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+class SolverRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    mode: SolverMode = SolverMode.COMPLETE
+    seed: int = Field(default=0, ge=0, le=MAX_SOLVER_SEED)
+    time_limit_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        alias="timeLimitSeconds",
+    )
 
 
 def _counts(batch: ImportBatch | None) -> dict[str, int]:
@@ -278,6 +300,26 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         if batch is None:
             raise ApiError(409, "no_active_import", "Нет активной версии данных")
         return JSONResponse(solver_problem_payload(build_solver_problem(batch)))
+
+    @app.post("/api/solver/runs")
+    def run_solver(request: SolverRunRequest) -> JSONResponse:
+        try:
+            repository.initialize()
+            batch = repository.get_active_batch()
+        except StorageError as error:
+            raise ApiError(500, "storage_error", str(error)) from error
+        if batch is None:
+            raise ApiError(409, "no_active_import", "Нет активной версии данных")
+        problem = build_solver_problem(batch)
+        result = CpSatScheduleSolver().solve(
+            problem,
+            SolverOptions(
+                mode=request.mode,
+                seed=request.seed,
+                time_limit_seconds=request.time_limit_seconds,
+            ),
+        )
+        return JSONResponse(solver_result_payload(result, problem))
 
     @app.post("/api/imports/preview")
     async def preview(file: UploadFile) -> JSONResponse:

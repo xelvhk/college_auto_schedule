@@ -48,7 +48,11 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("Импорт исходных данных", response.text)
         self.assertIn('id="readiness-summary"', response.text)
         self.assertIn('id="academic-cycle-count"', response.text)
+        self.assertIn('id="solve-button"', response.text)
+        self.assertIn('id="schedule-result"', response.text)
         self.assertIn("renderReadiness(payload.readiness)", script.text)
+        self.assertIn('fetch("/api/solver/runs"', script.text)
+        self.assertIn("renderSchedule(payload)", script.text)
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
@@ -127,6 +131,37 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"]["code"], "no_active_import")
+
+    def test_solver_run_returns_draft_schedule(self) -> None:
+        self.upload("/api/imports/activate", "valid-import.xlsx")
+
+        response = self.client.post(
+            "/api/solver/runs",
+            json={"mode": "complete", "seed": 7, "timeLimitSeconds": 10},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "feasible")
+        self.assertEqual(payload["seed"], 7)
+        self.assertEqual(payload["assignmentCount"], 36)
+        self.assertEqual(payload["assignments"][0]["demandCode"], "W-001#001")
+        self.assertEqual(payload["assignments"][0]["disciplineCode"], "MDK.01.01")
+        self.assertTrue(payload["assignments"][0]["occupiedSlotCodes"])
+
+    def test_solver_run_validates_options_and_requires_active_version(self) -> None:
+        missing = self.client.post("/api/solver/runs", json={})
+        invalid = self.client.post(
+            "/api/solver/runs", json={"timeLimitSeconds": 301}
+        )
+        invalid_seed = self.client.post(
+            "/api/solver/runs", json={"seed": 2_147_483_648}
+        )
+
+        self.assertEqual(missing.status_code, 409)
+        self.assertEqual(missing.json()["error"]["code"], "no_active_import")
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(invalid_seed.status_code, 422)
 
     def test_preview_reports_workload_without_matching_room(self) -> None:
         source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
