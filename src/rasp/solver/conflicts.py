@@ -40,12 +40,16 @@ def find_assignment_conflicts(
     for section, attribute, code, message in resources:
         placements: defaultdict[tuple[date, str, str], list[str]] = defaultdict(list)
         for assignment in assignments:
-            key = (
-                assignment.lesson_date,
+            occupied_slots = assignment.occupied_slot_codes or (
                 assignment.slot_code,
-                getattr(assignment, attribute),
             )
-            placements[key].append(assignment.demand_code)
+            for slot_code in occupied_slots:
+                key = (
+                    assignment.lesson_date,
+                    slot_code,
+                    getattr(assignment, attribute),
+                )
+                placements[key].append(assignment.demand_code)
         for (lesson_date, slot_code, object_code), demand_codes in placements.items():
             if len(demand_codes) < 2:
                 continue

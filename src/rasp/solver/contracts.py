@@ -13,6 +13,7 @@ DemandCode = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
 ]
+MAX_SOLVER_SEED = 2_147_483_647
 
 
 class DiagnosticSeverity(StrEnum):
@@ -92,7 +93,8 @@ class SolverProblem(DomainModel):
 
 class SolverOptions(DomainModel):
     mode: SolverMode = SolverMode.COMPLETE
-    seed: int = Field(default=0, ge=0)
+    seed: int = Field(default=0, ge=0, le=MAX_SOLVER_SEED)
+    time_limit_seconds: int = Field(default=30, ge=1, le=300)
 
 
 class ScheduleAssignment(DomainModel):
@@ -102,6 +104,7 @@ class ScheduleAssignment(DomainModel):
     room_code: Code
     lesson_date: date
     slot_code: Code
+    occupied_slot_codes: tuple[Code, ...] = ()
 
 
 class SolverResult(DomainModel):

@@ -96,7 +96,10 @@ class AssignmentConflictTests(unittest.TestCase):
             "room_code": "R-101",
             "lesson_date": "2026-09-01",
             "slot_code": "S1-01",
+            "occupied_slot_codes": ("S1-01",),
         }
+        if "slot_code" in changes and "occupied_slot_codes" not in changes:
+            changes["occupied_slot_codes"] = (changes["slot_code"],)
         values.update(changes)
         return ScheduleAssignment(**values)
 
@@ -129,6 +132,25 @@ class AssignmentConflictTests(unittest.TestCase):
         )
 
         self.assertEqual(conflicts, ())
+
+    def test_later_occupied_slot_is_checked_for_conflicts(self) -> None:
+        conflicts = find_assignment_conflicts(
+            (
+                self.assignment(
+                    "W-001#001",
+                    occupied_slot_codes=("S1-01", "S1-02"),
+                ),
+                self.assignment(
+                    "W-002#001",
+                    slot_code="S1-02",
+                    occupied_slot_codes=("S1-02",),
+                    room_code="R-102",
+                    teacher_code="T-002",
+                ),
+            )
+        )
+
+        self.assertEqual([item.code for item in conflicts], ["group_double_booking"])
 
 
 if __name__ == "__main__":

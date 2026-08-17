@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from rasp.solver.contracts import DiagnosticSeverity, SolverDiagnostic, SolverProblem
+from rasp.solver.contracts import (
+    DiagnosticSeverity,
+    SolverDiagnostic,
+    SolverProblem,
+    SolverResult,
+)
 
 
 def _diagnostic_payload(diagnostic: SolverDiagnostic) -> dict[str, object]:
@@ -75,5 +80,38 @@ def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
                 ],
             }
             for domain in problem.placement_domains[:5]
+        ],
+    }
+
+
+def solver_result_payload(
+    result: SolverResult,
+    problem: SolverProblem,
+) -> dict[str, object]:
+    demands = {item.demand_code: item for item in problem.demands}
+    assignments: list[dict[str, object]] = []
+    for assignment in result.assignments:
+        demand = demands[assignment.demand_code]
+        assignments.append(
+            {
+                "demandCode": assignment.demand_code,
+                "workloadRowCode": demand.workload_row_code,
+                "disciplineCode": demand.discipline_code,
+                "groupCode": assignment.group_code,
+                "teacherCode": assignment.teacher_code,
+                "lessonDate": assignment.lesson_date.isoformat(),
+                "slotCode": assignment.slot_code,
+                "occupiedSlotCodes": assignment.occupied_slot_codes
+                or (assignment.slot_code,),
+                "roomCode": assignment.room_code,
+            }
+        )
+    return {
+        "status": result.status.value,
+        "seed": result.seed,
+        "assignmentCount": len(assignments),
+        "assignments": assignments,
+        "diagnostics": [
+            _diagnostic_payload(diagnostic) for diagnostic in result.diagnostics
         ],
     }
