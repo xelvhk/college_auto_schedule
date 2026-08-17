@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from ortools.sat.python import cp_model
-
 from rasp.solver.contracts import (
     DiagnosticSeverity,
     ScheduleAssignment,
@@ -54,6 +52,8 @@ class CpSatScheduleSolver:
                 "missing_placement_domain",
                 "Для части нагрузки отсутствуют допустимые размещения.",
             )
+
+        from ortools.sat.python import cp_model
 
         model = cp_model.CpModel()
         variables: dict[tuple[str, int], cp_model.IntVar] = {}

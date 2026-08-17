@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
+import sys
 import tempfile
 import unittest
 import ctypes
@@ -17,6 +19,23 @@ from rasp.desktop import (
 
 
 class DesktopLauncherTests(unittest.TestCase):
+    def test_web_startup_does_not_eagerly_load_solver_engine(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; import rasp.web.app; "
+                    "raise SystemExit(any(name.startswith('ortools') for name in sys.modules))"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_windows_data_directory_uses_local_app_data(self) -> None:
         with patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\User\AppData\Local"}):
             directory = resolve_data_directory(platform="win32")

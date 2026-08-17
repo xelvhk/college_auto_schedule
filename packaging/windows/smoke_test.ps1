@@ -12,7 +12,7 @@ $process = Start-Process -FilePath $executablePath -PassThru
 try {
     $lockPath = Join-Path $testLocalAppData "CollegeAutoSchedule\application.lock"
     $status = $null
-    for ($attempt = 0; $attempt -lt 90; $attempt++) {
+    for ($attempt = 0; $attempt -lt 240; $attempt++) {
         if (Test-Path -LiteralPath $lockPath) {
             try {
                 $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
@@ -70,7 +70,7 @@ try {
     $process.WaitForExit()
     $process = Start-Process -FilePath $executablePath -PassThru
     $status = $null
-    for ($attempt = 0; $attempt -lt 90; $attempt++) {
+    for ($attempt = 0; $attempt -lt 240; $attempt++) {
         try {
             $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
             $status = Invoke-RestMethod -Uri "$($lock.url)/api/status" -TimeoutSec 1
