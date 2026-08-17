@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.3.4-alpha.1"
+  #define AppVersion "0.3.5-alpha.1"
 #endif
 
 #define AppName "Расписание колледжа"

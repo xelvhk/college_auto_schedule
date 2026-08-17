@@ -174,6 +174,8 @@ class ImportCliTests(unittest.TestCase):
         self.assertEqual(result["workloadCount"], 1)
         self.assertEqual(result["lessonDemandCount"], 36)
         self.assertEqual(result["eligibleWeekCount"], 9)
+        self.assertEqual(result["placementDomainCount"], 1)
+        self.assertEqual(result["placementOptionCount"], 50)
         self.assertEqual(result["demandSamples"][0]["demandCode"], "W-001#001")
 
     def test_solver_problem_without_active_version_returns_stable_error(self) -> None:

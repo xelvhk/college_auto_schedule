@@ -30,6 +30,10 @@ def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
         "workloadCount": problem.source_workload_count,
         "lessonDemandCount": len(problem.demands),
         "eligibleWeekCount": len(eligible_weeks),
+        "placementDomainCount": len(problem.placement_domains),
+        "placementOptionCount": sum(
+            len(domain.options) for domain in problem.placement_domains
+        ),
         "errorCount": sum(
             item.severity is DiagnosticSeverity.ERROR
             for item in problem.diagnostics
@@ -55,5 +59,21 @@ def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
                 ],
             }
             for demand in problem.demands[:5]
+        ],
+        "placementDomainSamples": [
+            {
+                "workloadRowCode": domain.workload_row_code,
+                "optionCount": len(domain.options),
+                "options": [
+                    {
+                        "lessonDate": option.lesson_date.isoformat(),
+                        "teachingWeekStart": option.teaching_week_start.isoformat(),
+                        "slotCodes": option.slot_codes,
+                        "roomCode": option.room_code,
+                    }
+                    for option in domain.options[:5]
+                ],
+            }
+            for domain in problem.placement_domains[:5]
         ],
     }

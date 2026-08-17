@@ -19,6 +19,7 @@ from rasp.solver.contracts import (
     SolverDiagnostic,
     SolverProblem,
 )
+from rasp.solver.placements import build_placement_domains
 
 
 MAX_LESSON_DEMANDS = 100_000
@@ -180,9 +181,12 @@ def build_solver_problem(batch: ImportBatch) -> SolverProblem:
                 )
             )
 
+    placement_domains, placement_diagnostics = build_placement_domains(batch)
+    diagnostics.extend(placement_diagnostics)
     _sort_diagnostics(diagnostics)
     return SolverProblem(
         source_workload_count=len(ordered_workloads),
         demands=tuple(demands),
         diagnostics=tuple(diagnostics),
+        placement_domains=placement_domains,
     )

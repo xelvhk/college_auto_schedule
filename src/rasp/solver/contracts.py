@@ -64,10 +64,23 @@ class LessonDemand(DomainModel):
     eligible_week_starts: tuple[date, ...]
 
 
+class PlacementOption(DomainModel):
+    lesson_date: date
+    teaching_week_start: date
+    slot_codes: tuple[Code, ...] = Field(min_length=1)
+    room_code: Code
+
+
+class WorkloadPlacementDomain(DomainModel):
+    workload_row_code: Code
+    options: tuple[PlacementOption, ...]
+
+
 class SolverProblem(DomainModel):
     source_workload_count: int = Field(ge=0)
     demands: tuple[LessonDemand, ...]
     diagnostics: tuple[SolverDiagnostic, ...]
+    placement_domains: tuple[WorkloadPlacementDomain, ...] = ()
 
     @property
     def is_ready(self) -> bool:
