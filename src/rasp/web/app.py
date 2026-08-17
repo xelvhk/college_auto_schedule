@@ -311,14 +311,22 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         if batch is None:
             raise ApiError(409, "no_active_import", "Нет активной версии данных")
         problem = build_solver_problem(batch)
-        result = CpSatScheduleSolver().solve(
-            problem,
-            SolverOptions(
-                mode=request.mode,
-                seed=request.seed,
-                time_limit_seconds=request.time_limit_seconds,
-            ),
-        )
+        try:
+            result = CpSatScheduleSolver().solve(
+                problem,
+                SolverOptions(
+                    mode=request.mode,
+                    seed=request.seed,
+                    time_limit_seconds=request.time_limit_seconds,
+                ),
+            )
+        except Exception as error:
+            error_type = type(error).__name__
+            raise ApiError(
+                500,
+                "solver_engine_error",
+                f"Не удалось запустить механизм расчёта ({error_type})",
+            ) from error
         return JSONResponse(solver_result_payload(result, problem))
 
     @app.post("/api/imports/preview")

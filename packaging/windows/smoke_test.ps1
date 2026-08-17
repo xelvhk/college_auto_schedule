@@ -49,11 +49,20 @@ try {
         seed = 0
         timeLimitSeconds = 30
     } | ConvertTo-Json
-    $solution = Invoke-RestMethod `
-        -Uri "$($lock.url)/api/solver/runs" `
-        -Method Post `
-        -ContentType "application/json" `
-        -Body $solverRequest
+    try {
+        $solution = Invoke-RestMethod `
+            -Uri "$($lock.url)/api/solver/runs" `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body $solverRequest
+    }
+    catch {
+        $solverError = $_.ErrorDetails.Message
+        if (-not $solverError) {
+            $solverError = $_.Exception.Message
+        }
+        throw "Packaged solver request failed: $solverError"
+    }
     if ($solution.status -ne "feasible" -or $solution.assignmentCount -ne 36) {
         throw "Packaged solver did not produce the canonical 36-assignment draft."
     }

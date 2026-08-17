@@ -19,6 +19,17 @@ from rasp.desktop import (
 
 
 class DesktopLauncherTests(unittest.TestCase):
+    def test_pyinstaller_spec_collects_solver_native_libraries(self) -> None:
+        spec = (
+            Path(__file__).parents[1]
+            / "packaging"
+            / "windows"
+            / "college_auto_schedule.spec"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('collect_dynamic_libs("ortools")', spec)
+        self.assertIn('"ortools.sat.python.cp_model_helper"', spec)
+
     def test_web_startup_does_not_eagerly_load_solver_engine(self) -> None:
         result = subprocess.run(
             [

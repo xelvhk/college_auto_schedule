@@ -4,6 +4,7 @@ from io import BytesIO
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -148,6 +149,21 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["assignments"][0]["demandCode"], "W-001#001")
         self.assertEqual(payload["assignments"][0]["disciplineCode"], "MDK.01.01")
         self.assertTrue(payload["assignments"][0]["occupiedSlotCodes"])
+
+    def test_solver_run_reports_engine_failure_without_private_details(self) -> None:
+        self.upload("/api/imports/activate", "valid-import.xlsx")
+
+        with patch(
+            "rasp.web.app.CpSatScheduleSolver.solve",
+            side_effect=RuntimeError("private runtime detail"),
+        ):
+            response = self.client.post("/api/solver/runs", json={})
+
+        self.assertEqual(response.status_code, 500)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "solver_engine_error")
+        self.assertIn("RuntimeError", payload["error"]["message"])
+        self.assertNotIn("private runtime detail", response.text)
 
     def test_solver_run_validates_options_and_requires_active_version(self) -> None:
         missing = self.client.post("/api/solver/runs", json={})

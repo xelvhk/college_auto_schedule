@@ -1,19 +1,26 @@
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
 
 project_root = Path(SPECPATH).resolve().parents[1]
+ortools_binaries = collect_dynamic_libs("ortools")
 
 a = Analysis(
     [str(project_root / "src" / "rasp" / "desktop.py")],
     pathex=[str(project_root / "src")],
-    binaries=[],
+    binaries=ortools_binaries,
     datas=[
         (
             str(project_root / "src" / "rasp" / "web" / "static"),
             "rasp/web/static",
         )
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        "ortools.sat.python.cp_model",
+        "ortools.sat.python.cp_model_helper",
+        "ortools.util.python.sorted_interval_list",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
