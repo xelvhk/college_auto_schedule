@@ -76,6 +76,9 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["roomDeficits"], [])
         self.assertTrue(payload["readiness"]["isReady"])
         self.assertEqual(payload["readiness"]["issues"], [])
+        self.assertTrue(payload["solverProblem"]["isReady"])
+        self.assertEqual(payload["solverProblem"]["lessonDemandCount"], 36)
+        self.assertEqual(payload["solverProblem"]["eligibleWeekCount"], 9)
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 
@@ -105,8 +108,19 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(readiness.json()["isReady"])
         self.assertEqual(readiness.json()["errorCount"], 0)
 
+        solver_problem = self.client.get("/api/solver/problem")
+        self.assertEqual(solver_problem.status_code, 200)
+        self.assertTrue(solver_problem.json()["isReady"])
+        self.assertEqual(solver_problem.json()["lessonDemandCount"], 36)
+
     def test_readiness_without_active_version_is_conflict(self) -> None:
         response = self.client.get("/api/readiness")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "no_active_import")
+
+    def test_solver_problem_without_active_version_is_conflict(self) -> None:
+        response = self.client.get("/api/solver/problem")
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"]["code"], "no_active_import")

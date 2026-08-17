@@ -28,6 +28,7 @@ from rasp.imports.excel import (
     ImportValidationError,
     read_import_workbook,
 )
+from rasp.solver import build_solver_problem, solver_problem_payload
 from rasp.storage.sqlite import (
     SqliteImportRepository,
     StorageError,
@@ -267,6 +268,17 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise ApiError(409, "no_active_import", "Нет активной версии данных")
         return JSONResponse(_readiness_payload(batch))
 
+    @app.get("/api/solver/problem")
+    def solver_problem() -> JSONResponse:
+        try:
+            repository.initialize()
+            batch = repository.get_active_batch()
+        except StorageError as error:
+            raise ApiError(500, "storage_error", str(error)) from error
+        if batch is None:
+            raise ApiError(409, "no_active_import", "Нет активной версии данных")
+        return JSONResponse(solver_problem_payload(build_solver_problem(batch)))
+
     @app.post("/api/imports/preview")
     async def preview(file: UploadFile) -> JSONResponse:
         async with _staged_upload(file) as staged_path:
@@ -300,6 +312,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     for item in analyze_room_supply(batch)
                 ],
                 "readiness": _readiness_payload(batch),
+                "solverProblem": solver_problem_payload(build_solver_problem(batch)),
                 "warnings": _readiness_warnings(batch),
                 "samples": {
                     "teachers": [

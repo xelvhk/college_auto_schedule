@@ -157,6 +157,33 @@ class ImportCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 5)
         self.assertEqual(result["error"]["code"], "no_active_import")
 
+    def test_solver_problem_reports_deterministic_active_problem(self) -> None:
+        self.run_cli(
+            "import",
+            str(FIXTURES / "valid-import.xlsx"),
+            "--database",
+            str(self.database_path),
+        )
+
+        exit_code, result = self.run_cli(
+            "solver-problem", "--database", str(self.database_path)
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["isReady"])
+        self.assertEqual(result["workloadCount"], 1)
+        self.assertEqual(result["lessonDemandCount"], 36)
+        self.assertEqual(result["eligibleWeekCount"], 9)
+        self.assertEqual(result["demandSamples"][0]["demandCode"], "W-001#001")
+
+    def test_solver_problem_without_active_version_returns_stable_error(self) -> None:
+        exit_code, result = self.run_cli(
+            "solver-problem", "--database", str(self.database_path)
+        )
+
+        self.assertEqual(exit_code, 5)
+        self.assertEqual(result["error"]["code"], "no_active_import")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from rasp.solver.contracts import DiagnosticSeverity, SolverDiagnostic, SolverProblem
+
+
+def _diagnostic_payload(diagnostic: SolverDiagnostic) -> dict[str, object]:
+    return {
+        "severity": diagnostic.severity.value,
+        "code": diagnostic.code,
+        "message": diagnostic.message,
+        "section": diagnostic.section,
+        "objectCode": diagnostic.object_code,
+        "lessonDate": diagnostic.lesson_date.isoformat()
+        if diagnostic.lesson_date
+        else None,
+        "slotCode": diagnostic.slot_code,
+        "demandCodes": diagnostic.demand_codes,
+        "remediation": diagnostic.remediation,
+    }
+
+
+def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
+    eligible_weeks = {
+        week
+        for demand in problem.demands
+        for week in demand.eligible_week_starts
+    }
+    return {
+        "isReady": problem.is_ready,
+        "workloadCount": problem.source_workload_count,
+        "lessonDemandCount": len(problem.demands),
+        "eligibleWeekCount": len(eligible_weeks),
+        "errorCount": sum(
+            item.severity is DiagnosticSeverity.ERROR
+            for item in problem.diagnostics
+        ),
+        "warningCount": sum(
+            item.severity is DiagnosticSeverity.WARNING
+            for item in problem.diagnostics
+        ),
+        "diagnostics": [
+            _diagnostic_payload(diagnostic)
+            for diagnostic in problem.diagnostics
+        ],
+        "demandSamples": [
+            {
+                "demandCode": demand.demand_code,
+                "workloadRowCode": demand.workload_row_code,
+                "groupCode": demand.group_code,
+                "teacherCode": demand.teacher_code,
+                "disciplineCode": demand.discipline_code,
+                "durationAcademicHours": demand.duration_academic_hours,
+                "eligibleWeekStarts": [
+                    week.isoformat() for week in demand.eligible_week_starts
+                ],
+            }
+            for demand in problem.demands[:5]
+        ],
+    }

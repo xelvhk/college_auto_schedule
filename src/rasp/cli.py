@@ -12,6 +12,7 @@ from rasp.application.imports import (
 from rasp.application.readiness import ReadinessIssue, analyze_schedule_readiness
 from rasp.domain.models import ImportBatch
 from rasp.imports.excel import ImportValidationError, read_import_workbook
+from rasp.solver import build_solver_problem, solver_problem_payload
 from rasp.storage.sqlite import (
     SqliteImportRepository,
     StorageError,
@@ -38,6 +39,10 @@ def _parser() -> argparse.ArgumentParser:
         "readiness", help="проверить готовность активных данных к расчёту"
     )
     readiness.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    solver_problem = subparsers.add_parser(
+        "solver-problem", help="подготовить задачу для расчёта расписания"
+    )
+    solver_problem.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     activate_version = subparsers.add_parser(
         "activate-version", help="вернуться к сохраненной версии данных"
     )
@@ -269,7 +274,10 @@ def _readiness(database_path: Path) -> int:
         batch = repository.get_active_batch()
     except StorageError as error:
         _print_json(
-            {"valid": False, "error": {"code": "storage_error", "message": str(error)}}
+            {
+                "valid": False,
+                "error": {"code": "storage_error", "message": str(error)},
+            }
         )
         return 3
     if batch is None:
@@ -287,6 +295,31 @@ def _readiness(database_path: Path) -> int:
     return 0
 
 
+def _solver_problem(database_path: Path) -> int:
+    repository = SqliteImportRepository(database_path)
+    try:
+        repository.initialize()
+        batch = repository.get_active_batch()
+    except StorageError as error:
+        _print_json(
+            {"valid": False, "error": {"code": "storage_error", "message": str(error)}}
+        )
+        return 3
+    if batch is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": {
+                    "code": "no_active_import",
+                    "message": "No active import version",
+                },
+            }
+        )
+        return 5
+    _print_json(solver_problem_payload(build_solver_problem(batch)))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "validate":
@@ -297,6 +330,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _status(arguments.database)
     if arguments.command == "readiness":
         return _readiness(arguments.database)
+    if arguments.command == "solver-problem":
+        return _solver_problem(arguments.database)
     if arguments.command == "activate-version":
         return _activate_version(arguments.version_id, arguments.database)
     raise AssertionError(f"Unhandled command: {arguments.command}")
