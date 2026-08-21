@@ -17,6 +17,7 @@ from rasp.application.imports import (
     validate_and_activate_workbook,
     validate_curriculum_readiness,
 )
+from rasp.application.manual_data import validate_and_activate_manual_batch
 from rasp.application.readiness import (
     ReadinessIssue,
     ReadinessSeverity,
@@ -68,6 +69,18 @@ class SolverRunRequest(BaseModel):
         ge=1,
         le=300,
         alias="timeLimitSeconds",
+    )
+
+
+class ManualDataRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    batch: ImportBatch
+    source_name: str = Field(
+        default="Ручной ввод",
+        min_length=1,
+        max_length=255,
+        alias="sourceName",
     )
 
 
@@ -450,6 +463,48 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             content={
                 "valid": True,
                 "versionId": receipt.version_id,
+                "createdAt": receipt.created_at,
+                "reused": receipt.reused,
+                "counts": {
+                    "teachers": receipt.teacher_count,
+                    "groups": receipt.group_count,
+                    "workloads": receipt.workload_count,
+                    "specialties": receipt.specialty_count,
+                    "curricula": receipt.curriculum_count,
+                    "disciplines": receipt.discipline_count,
+                    "students": receipt.student_count,
+                    "buildings": receipt.building_count,
+                    "roomTypes": receipt.room_type_count,
+                    "equipment": receipt.equipment_count,
+                    "rooms": receipt.room_count,
+                    "academicYears": receipt.academic_year_count,
+                    "academicCycles": receipt.academic_cycle_count,
+                    "calendarPeriods": receipt.calendar_period_count,
+                    "bellSlots": receipt.bell_slot_count,
+                    "calendarExceptions": receipt.calendar_exception_count,
+                    "resourceUnavailability": receipt.resource_unavailability_count,
+                },
+            },
+        )
+
+    @app.post("/api/manual-data/activate", status_code=201)
+    def activate_manual_data(request: ManualDataRequest) -> JSONResponse:
+        try:
+            receipt = validate_and_activate_manual_batch(
+                request.batch,
+                repository,
+                source_name=request.source_name,
+            )
+        except ImportValidationError as error:
+            return JSONResponse(status_code=422, content=_issues_payload(error))
+        except StorageError as error:
+            raise ApiError(500, "storage_error", str(error)) from error
+        return JSONResponse(
+            status_code=201,
+            content={
+                "valid": True,
+                "versionId": receipt.version_id,
+                "sourceName": request.source_name,
                 "createdAt": receipt.created_at,
                 "reused": receipt.reused,
                 "counts": {

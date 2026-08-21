@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from rasp.web.app import create_app
+from rasp.imports.excel import read_import_workbook
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -178,6 +179,48 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(missing.json()["error"]["code"], "no_active_import")
         self.assertEqual(invalid.status_code, 422)
         self.assertEqual(invalid_seed.status_code, 422)
+
+    def test_manual_data_activation_creates_a_standard_active_version(self) -> None:
+        batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
+
+        response = self.client.post(
+            "/api/manual-data/activate",
+            json={
+                "sourceName": "Ручной ввод: тестовый колледж",
+                "batch": batch.model_dump(mode="json"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["versionId"], 1)
+        self.assertEqual(response.json()["sourceName"], "Ручной ввод: тестовый колледж")
+        readiness = self.client.get("/api/readiness")
+        self.assertTrue(readiness.json()["isReady"])
+
+    def test_invalid_manual_data_does_not_replace_active_version(self) -> None:
+        valid_batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
+        self.client.post(
+            "/api/manual-data/activate",
+            json={"batch": valid_batch.model_dump(mode="json")},
+        )
+        invalid_batch = valid_batch.model_copy(
+            update={
+                "workloads": (
+                    valid_batch.workloads[0].model_copy(
+                        update={"discipline_code": "UNKNOWN"}
+                    ),
+                )
+            }
+        )
+
+        response = self.client.post(
+            "/api/manual-data/activate",
+            json={"batch": invalid_batch.model_dump(mode="json")},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["issues"][0]["code"], "discipline_not_in_curriculum")
+        self.assertEqual(self.client.get("/api/status").json()["activeVersionId"], 1)
 
     def test_preview_reports_workload_without_matching_room(self) -> None:
         source = BytesIO((FIXTURES / "valid-import.xlsx").read_bytes())
