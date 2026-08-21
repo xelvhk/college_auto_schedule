@@ -465,6 +465,11 @@ function setEntryMode(mode) {
 }
 
 const manualRowFields = {
+  "cycle-commissions": [
+    ["commission-code", "Код", "CC-IT"],
+    ["commission-name", "Наименование", "Цикловая комиссия ИТ"],
+    ["department", "Подразделение", "Учебная часть", "text", null, false],
+  ],
   rooms: [
     ["room-code", "Код", "R-101"],
     ["room-name", "Название", "Аудитория 101"],
@@ -474,6 +479,7 @@ const manualRowFields = {
     ["teacher-code", "Код", "T-001"],
     ["full-name", "ФИО", "Иванов Иван Иванович"],
     ["department", "Подразделение", "ЦК ИТ"],
+    ["cycle-commission-code", "Код комиссии", "CC-IT", "text", null, false],
   ],
   groups: [
     ["group-code", "Код", "ИС-101"],
@@ -496,6 +502,15 @@ const manualRowFields = {
     ["event-hours", "Часов в занятии", "2", "number"],
     ["lesson-type", "Вид", "lecture", "select", [["lecture", "Лекция"], ["practice", "Практика"], ["lab", "Лабораторная"]]],
   ],
+  "teacher-replacements": [
+    ["replacement-code", "Код", "REP-001"],
+    ["original-teacher-code", "Основной преподаватель", "T-001"],
+    ["substitute-teacher-code", "Замещающий преподаватель", "T-002"],
+    ["starts-on", "Начало", "2026-09-01", "date"],
+    ["ends-on", "Конец", "2026-09-30", "date"],
+    ["workload-code", "Код строки нагрузки", "", "text", null, false],
+    ["reason", "Причина", "Больничный", "text", null, false],
+  ],
   "bell-slots": [
     ["slot-code", "Код", "DAY-01"],
     ["lesson-number", "№ пары", "1", "number"],
@@ -509,7 +524,7 @@ function createManualRow(kind) {
   const index = rows.children.length + 1;
   const row = document.createElement("div");
   row.className = "manual-row";
-  manualRowFields[kind].forEach(([field, label, value, type = "text", choices]) => {
+  manualRowFields[kind].forEach(([field, label, value, type = "text", choices, required = true]) => {
     const wrapper = document.createElement("label");
     wrapper.textContent = label;
     let control;
@@ -527,8 +542,16 @@ function createManualRow(kind) {
       if (type === "number") control.min = "1";
     }
     control.dataset.field = field;
-    control.required = true;
-    control.value = index === 1 ? value : field.includes("code") ? `${value}-${index}` : value;
+    control.required = required;
+    const uniqueCode = new Set([
+      "rooms:room-code", "teachers:teacher-code", "groups:group-code",
+      "disciplines:discipline-code", "workloads:workload-code",
+      "bell-slots:slot-code", "cycle-commissions:commission-code",
+      "teacher-replacements:replacement-code",
+    ]);
+    control.value = index === 1 || !uniqueCode.has(`${kind}:${field}`)
+      ? value
+      : `${value}-${index}`;
     wrapper.append(control);
     row.append(wrapper);
   });
@@ -592,10 +615,15 @@ function buildManualBatch() {
   workloads.forEach((item) => assignedHours.set(item.teacher_code, (assignedHours.get(item.teacher_code) || 0) + item.total_academic_hours));
 
   return {
+    cycle_commissions: manualRows("cycle-commissions").map((row) => ({
+      commission_code: row["commission-code"], commission_name: row["commission-name"],
+      department: row.department || null, active: true,
+    })),
     teachers: manualRows("teachers").map((row) => ({
       teacher_code: row["teacher-code"],
       full_name: row["full-name"],
       department: row.department || null,
+      cycle_commission_code: row["cycle-commission-code"] || null,
       yearly_assigned_hours: assignedHours.get(row["teacher-code"]) || 0,
       active: true,
     })),
@@ -611,6 +639,12 @@ function buildManualBatch() {
       subgroup_count: 1,
     })),
     workloads,
+    teacher_replacements: manualRows("teacher-replacements").map((row) => ({
+      replacement_code: row["replacement-code"], academic_year: academicYear,
+      original_teacher_code: row["original-teacher-code"], substitute_teacher_code: row["substitute-teacher-code"],
+      starts_on: row["starts-on"], ends_on: row["ends-on"],
+      workload_row_code: row["workload-code"] || null, reason: row.reason || null,
+    })),
     specialties: [{
       specialty_code: specialtyCode,
       specialty_name: manualBase("specialty-name"),
@@ -697,5 +731,7 @@ elements.uploadZone.addEventListener("drop", (event) => {
   if (file) setFile(file);
 });
 
-Object.keys(manualRowFields).forEach(createManualRow);
+Object.keys(manualRowFields)
+  .filter((kind) => kind !== "teacher-replacements")
+  .forEach(createManualRow);
 loadStatus();

@@ -157,6 +157,35 @@ class ImportBatchTests(unittest.TestCase):
         self.assertEqual(len(batch.workloads), 1)
         self.assertEqual(batch.workloads[0].teacher_code, "T-001")
 
+    def test_imports_optional_commissions_and_teacher_replacements(self) -> None:
+        substitute = {
+            "teacher_code": "T-002",
+            "full_name": "Петров Пётр Петрович",
+            "yearly_assigned_hours": 0,
+            "active": True,
+        }
+        self.teacher_rows[0]["cycle_commission_code"] = "CC-IT"
+        batch = build_import_batch(
+            teacher_rows=[*self.teacher_rows, substitute],
+            group_rows=self.group_rows,
+            workload_rows=self.workload_rows,
+            cycle_commission_rows=[
+                {"commission_code": "CC-IT", "commission_name": "Цикловая комиссия ИТ"}
+            ],
+            teacher_replacement_rows=[
+                {
+                    "replacement_code": "REP-001", "academic_year": "2026/2027",
+                    "original_teacher_code": "T-001", "substitute_teacher_code": "T-002",
+                    "starts_on": "2026-09-01", "ends_on": "2026-09-30",
+                    "workload_row_code": "W-001",
+                }
+            ],
+        )
+
+        self.assertEqual(batch.teachers[0].cycle_commission_code, "CC-IT")
+        self.assertEqual(batch.cycle_commissions[0].commission_code, "CC-IT")
+        self.assertEqual(batch.teacher_replacements[0].substitute_teacher_code, "T-002")
+
     def test_rejects_unknown_teacher_without_returning_partial_batch(self) -> None:
         self.workload_rows[0]["teacher_code"] = "T-404"
 

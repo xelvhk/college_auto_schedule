@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from rasp.domain.models import (
     AcademicCycle,
+    CycleCommission,
     Building,
     Equipment,
     Group,
@@ -21,6 +22,7 @@ from rasp.domain.models import (
     RoomType,
     Student,
     Teacher,
+    TeacherReplacement,
     WorkloadItem,
 )
 from rasp.imports.reference_data import (
@@ -80,6 +82,8 @@ CALENDAR_CONSTRAINT_SHEETS = {
     "Недоступность": "resource_unavailability",
 }
 ACADEMIC_CYCLE_SHEETS = {"Учебные циклы": "academic_cycles"}
+COMMISSION_SHEETS = {"Цикловые комиссии": "cycle_commissions"}
+REPLACEMENT_SHEETS = {"Замены преподавателей": "teacher_replacements"}
 RUSSIAN_HEADERS = {
     "Преподаватели": {
         "teacher_code": "Код преподавателя",
@@ -91,6 +95,7 @@ RUSSIAN_HEADERS = {
         "max_hours_per_day": "Макс. часов в день",
         "max_days_per_week": "Макс. дней в неделю",
         "home_building_code": "Основной корпус",
+        "cycle_commission_code": "Код цикловой комиссии",
         "active": "Активен",
     },
     "Группы": {
@@ -239,6 +244,19 @@ RUSSIAN_HEADERS = {
         "reason": "Причина",
     },
 }
+OPTIONAL_RUSSIAN_HEADERS = {
+    "Цикловые комиссии": {
+        "commission_code": "Код комиссии", "commission_name": "Наименование",
+        "department": "Подразделение", "active": "Активна",
+    },
+    "Замены преподавателей": {
+        "replacement_code": "Код замены", "academic_year": "Учебный год",
+        "original_teacher_code": "Код основного преподавателя",
+        "substitute_teacher_code": "Код замещающего преподавателя",
+        "starts_on": "Дата начала", "ends_on": "Дата окончания",
+        "workload_row_code": "Код строки нагрузки", "reason": "Причина",
+    },
+}
 FORBIDDEN_STUDENT_HEADERS = {
     "address",
     "attendance",
@@ -265,6 +283,11 @@ FORBIDDEN_STUDENT_HEADERS = {
 }
 REQUIRED_HEADERS = {
     "Преподаватели": {"teacher_code", "full_name", "yearly_assigned_hours"},
+    "Цикловые комиссии": {"commission_code", "commission_name"},
+    "Замены преподавателей": {
+        "replacement_code", "academic_year", "original_teacher_code",
+        "substitute_teacher_code", "starts_on", "ends_on",
+    },
     "Группы": {"group_code", "course", "headcount"},
     "Нагрузка": {
         "workload_row_code",
@@ -403,6 +426,8 @@ def build_import_batch(
     calendar_exception_rows: Iterable[Mapping[str, Any]] | None = None,
     resource_unavailability_rows: Iterable[Mapping[str, Any]] | None = None,
     academic_cycle_rows: Iterable[Mapping[str, Any]] | None = None,
+    cycle_commission_rows: Iterable[Mapping[str, Any]] | None = None,
+    teacher_replacement_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> ImportBatch:
     """Validate all rows and return a complete batch or no batch at all."""
 
@@ -422,6 +447,20 @@ def build_import_batch(
     equipment: list[Equipment] = []
     rooms: list[Room] = []
     academic_cycles: list[AcademicCycle] = []
+    cycle_commissions: list[CycleCommission] = []
+    teacher_replacements: list[TeacherReplacement] = []
+    if cycle_commission_rows is not None:
+        cycle_commissions, parsed = _parse_rows(
+            "cycle_commissions", cycle_commission_rows, CycleCommission
+        )
+        issues.extend(parsed)
+        issues.extend(_duplicate_issues("cycle_commissions", cycle_commissions, "commission_code"))
+    if teacher_replacement_rows is not None:
+        teacher_replacements, parsed = _parse_rows(
+            "teacher_replacements", teacher_replacement_rows, TeacherReplacement
+        )
+        issues.extend(parsed)
+        issues.extend(_duplicate_issues("teacher_replacements", teacher_replacements, "replacement_code"))
     room_inputs = (building_rows, room_type_rows, equipment_rows, room_rows)
     if any(rows is not None for rows in room_inputs):
         if not all(rows is not None for rows in room_inputs):
@@ -461,6 +500,23 @@ def build_import_batch(
         )
 
     teacher_codes = {teacher.teacher_code for teacher in teachers}
+    commission_codes = {
+        commission.commission_code for commission in cycle_commissions
+    }
+    for row_number, teacher in enumerate(teachers, start=2):
+        if (
+            teacher.cycle_commission_code
+            and teacher.cycle_commission_code not in commission_codes
+        ):
+            issues.append(
+                ImportIssue(
+                    "teachers",
+                    row_number,
+                    "cycle_commission_code",
+                    "unknown_cycle_commission",
+                    "Teacher references an unknown cycle commission",
+                )
+            )
     group_codes = {group.group_code for group in groups}
     for row_number, workload in enumerate(workloads, start=2):
         if workload.teacher_code not in teacher_codes:
@@ -481,6 +537,31 @@ def build_import_batch(
                     column="group_code",
                     code="unknown_group",
                     message=f"Unknown group code: {workload.group_code}",
+                )
+            )
+    workload_codes = {workload.workload_row_code for workload in workloads}
+    for row_number, replacement in enumerate(teacher_replacements, start=2):
+        if (
+            replacement.original_teacher_code not in teacher_codes
+            or replacement.substitute_teacher_code not in teacher_codes
+        ):
+            issues.append(
+                ImportIssue(
+                    "teacher_replacements",
+                    row_number,
+                    "original_teacher_code",
+                    "unknown_replacement_teacher",
+                    "Replacement references an unknown teacher",
+                )
+            )
+        if replacement.workload_row_code and replacement.workload_row_code not in workload_codes:
+            issues.append(
+                ImportIssue(
+                    "teacher_replacements",
+                    row=row_number,
+                    column="workload_row_code",
+                    code="unknown_replacement_workload",
+                    message="Replacement references an unknown workload",
                 )
             )
 
@@ -772,6 +853,8 @@ def build_import_batch(
         room_types=tuple(room_types),
         equipment=tuple(equipment),
         rooms=tuple(rooms),
+        cycle_commissions=tuple(cycle_commissions),
+        teacher_replacements=tuple(teacher_replacements),
     )
     if issues:
         raise ImportValidationError(issues)
@@ -934,7 +1017,9 @@ def _read_sheet_rows(worksheet: Any) -> list[dict[str, Any]]:
         )
     aliases = {
         russian.casefold(): canonical
-        for canonical, russian in RUSSIAN_HEADERS[worksheet.title].items()
+        for canonical, russian in (
+            RUSSIAN_HEADERS | OPTIONAL_RUSSIAN_HEADERS
+        )[worksheet.title].items()
     }
     headers = [aliases.get(header.casefold(), header) for header in headers]
     duplicate_headers = {header for header in headers if headers.count(header) > 1}
@@ -1032,6 +1117,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
         calendar_sheets_present = set(CALENDAR_SHEETS) & available_sheets
         constraint_sheets_present = set(CALENDAR_CONSTRAINT_SHEETS) & available_sheets
         cycle_sheets_present = set(ACADEMIC_CYCLE_SHEETS) & available_sheets
+        commission_sheets_present = set(COMMISSION_SHEETS) & available_sheets
+        replacement_sheets_present = set(REPLACEMENT_SHEETS) & available_sheets
         if reference_sheets_present and reference_sheets_present != set(
             REFERENCE_SHEETS
         ):
@@ -1076,6 +1163,10 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             selected_sheets.update(CALENDAR_CONSTRAINT_SHEETS)
         if cycle_sheets_present:
             selected_sheets.update(ACADEMIC_CYCLE_SHEETS)
+        if commission_sheets_present:
+            selected_sheets.update(COMMISSION_SHEETS)
+        if replacement_sheets_present:
+            selected_sheets.update(REPLACEMENT_SHEETS)
         for sheet_name, section in selected_sheets.items():
             try:
                 rows[section] = _read_sheet_rows(workbook[sheet_name])
@@ -1102,6 +1193,8 @@ def read_import_workbook(path: str | Path) -> ImportBatch:
             calendar_exception_rows=rows.get("calendar_exceptions"),
             resource_unavailability_rows=rows.get("resource_unavailability"),
             academic_cycle_rows=rows.get("academic_cycles"),
+            cycle_commission_rows=rows.get("cycle_commissions"),
+            teacher_replacement_rows=rows.get("teacher_replacements"),
         )
     finally:
         workbook.close()

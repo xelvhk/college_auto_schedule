@@ -96,6 +96,18 @@ class StudentStatus(StrEnum):
     DISMISSED = "dismissed"
 
 
+class CycleCommission(DomainModel):
+    commission_code: Code
+    commission_name: ShortText
+    department: str | None = Field(default=None, max_length=255)
+    active: bool = True
+
+    @field_validator("commission_code")
+    @classmethod
+    def normalize_codes(cls, value: str) -> str:
+        return value.upper()
+
+
 class Teacher(DomainModel):
     teacher_code: Code
     full_name: ShortText
@@ -106,9 +118,10 @@ class Teacher(DomainModel):
     max_hours_per_day: int | None = Field(default=None, ge=1, le=16)
     max_days_per_week: int | None = Field(default=None, ge=1, le=7)
     home_building_code: Code | None = None
+    cycle_commission_code: Code | None = None
     active: bool = True
 
-    @field_validator("teacher_code", "home_building_code")
+    @field_validator("teacher_code", "home_building_code", "cycle_commission_code")
     @classmethod
     def normalize_codes(cls, value: str | None) -> str | None:
         return value.upper() if value is not None else None
@@ -530,6 +543,37 @@ class WorkloadItem(DomainModel):
         return self
 
 
+class TeacherReplacement(DomainModel):
+    replacement_code: Code
+    academic_year: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")
+    ]
+    original_teacher_code: Code
+    substitute_teacher_code: Code
+    starts_on: date
+    ends_on: date
+    workload_row_code: Code | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator(
+        "replacement_code",
+        "original_teacher_code",
+        "substitute_teacher_code",
+        "workload_row_code",
+    )
+    @classmethod
+    def normalize_codes(cls, value: str | None) -> str | None:
+        return value.upper() if value is not None else None
+
+    @model_validator(mode="after")
+    def has_distinct_teachers_and_valid_dates(self) -> TeacherReplacement:
+        if self.original_teacher_code == self.substitute_teacher_code:
+            raise ValueError("replacement teachers must be different")
+        if self.ends_on < self.starts_on:
+            raise ValueError("ends_on must not be before starts_on")
+        return self
+
+
 class ImportBatch(DomainModel):
     teachers: tuple[Teacher, ...]
     groups: tuple[Group, ...]
@@ -548,6 +592,8 @@ class ImportBatch(DomainModel):
     bell_slots: tuple[BellSlot, ...] = ()
     calendar_exceptions: tuple[CalendarException, ...] = ()
     resource_unavailability: tuple[ResourceUnavailability, ...] = ()
+    cycle_commissions: tuple[CycleCommission, ...] = ()
+    teacher_replacements: tuple[TeacherReplacement, ...] = ()
 
 
 class ReferenceDataBatch(DomainModel):

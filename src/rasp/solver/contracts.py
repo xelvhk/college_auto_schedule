@@ -70,6 +70,7 @@ class PlacementOption(DomainModel):
     teaching_week_start: date
     slot_codes: tuple[Code, ...] = Field(min_length=1)
     room_code: Code
+    teacher_code: Code
 
 
 class WorkloadPlacementDomain(DomainModel):

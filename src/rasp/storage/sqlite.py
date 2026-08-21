@@ -28,11 +28,13 @@ from rasp.domain.models import (
     Specialty,
     Student,
     Teacher,
+    TeacherReplacement,
+    CycleCommission,
     WorkloadItem,
 )
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS teachers (
     max_hours_per_day INTEGER,
     max_days_per_week INTEGER,
     home_building_code TEXT,
+    cycle_commission_code TEXT,
     active INTEGER NOT NULL CHECK(active IN (0, 1)),
     PRIMARY KEY (import_version_id, teacher_code),
     FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
@@ -333,6 +336,41 @@ CREATE TABLE IF NOT EXISTS workload_items (
         REFERENCES student_groups(import_version_id, group_code)
         DEFERRABLE INITIALLY DEFERRED
 );
+
+CREATE TABLE IF NOT EXISTS cycle_commissions (
+    import_version_id INTEGER NOT NULL,
+    commission_code TEXT NOT NULL,
+    commission_name TEXT NOT NULL,
+    department TEXT,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    PRIMARY KEY (import_version_id, commission_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS teacher_replacements (
+    import_version_id INTEGER NOT NULL,
+    replacement_code TEXT NOT NULL,
+    academic_year TEXT NOT NULL,
+    original_teacher_code TEXT NOT NULL,
+    substitute_teacher_code TEXT NOT NULL,
+    starts_on TEXT NOT NULL,
+    ends_on TEXT NOT NULL,
+    workload_row_code TEXT,
+    reason TEXT,
+    PRIMARY KEY (import_version_id, replacement_code),
+    FOREIGN KEY (import_version_id) REFERENCES import_versions(version_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (import_version_id, original_teacher_code)
+        REFERENCES teachers(import_version_id, teacher_code)
+        DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (import_version_id, substitute_teacher_code)
+        REFERENCES teachers(import_version_id, teacher_code)
+        DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (import_version_id, workload_row_code)
+        REFERENCES workload_items(import_version_id, workload_row_code)
+        DEFERRABLE INITIALLY DEFERRED
+);
 """
 
 
@@ -430,6 +468,14 @@ class SqliteImportRepository:
                     connection.execute(
                         "ALTER TABLE workload_items "
                         "ADD COLUMN cycle_week_numbers TEXT NOT NULL DEFAULT ''"
+                    )
+                teacher_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(teachers)").fetchall()
+                }
+                if "cycle_commission_code" not in teacher_columns:
+                    connection.execute(
+                        "ALTER TABLE teachers ADD COLUMN cycle_commission_code TEXT"
                     )
                 if current_version < SCHEMA_VERSION:
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -649,6 +695,13 @@ class SqliteImportRepository:
         batch: ImportBatch,
     ) -> None:
         connection.executemany(
+            "INSERT INTO cycle_commissions VALUES (?, ?, ?, ?, ?)",
+            [
+                (version_id, item.commission_code, item.commission_name, item.department, int(item.active))
+                for item in batch.cycle_commissions
+            ],
+        )
+        connection.executemany(
             "INSERT INTO academic_years VALUES (?, ?, ?, ?, ?)",
             [
                 (
@@ -865,7 +918,7 @@ class SqliteImportRepository:
         )
         connection.executemany(
             """
-            INSERT INTO teachers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO teachers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -879,6 +932,7 @@ class SqliteImportRepository:
                     item.max_hours_per_day,
                     item.max_days_per_week,
                     item.home_building_code,
+                    item.cycle_commission_code,
                     int(item.active),
                 )
                 for item in batch.teachers
@@ -901,6 +955,18 @@ class SqliteImportRepository:
                     ";".join(item.elective_codes),
                 )
                 for item in batch.students
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO teacher_replacements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    version_id, item.replacement_code, item.academic_year,
+                    item.original_teacher_code, item.substitute_teacher_code,
+                    item.starts_on.isoformat(), item.ends_on.isoformat(),
+                    item.workload_row_code, item.reason,
+                )
+                for item in batch.teacher_replacements
             ],
         )
         connection.executemany(
@@ -1049,6 +1115,10 @@ class SqliteImportRepository:
                     "SELECT * FROM teachers WHERE import_version_id = ? ORDER BY teacher_code",
                     (version_id,),
                 ).fetchall()
+                commission_rows = connection.execute(
+                    "SELECT * FROM cycle_commissions WHERE import_version_id = ? ORDER BY commission_code",
+                    (version_id,),
+                ).fetchall()
                 group_rows = connection.execute(
                     "SELECT * FROM student_groups WHERE import_version_id = ? ORDER BY group_code",
                     (version_id,),
@@ -1058,6 +1128,10 @@ class SqliteImportRepository:
                     SELECT * FROM workload_items
                     WHERE import_version_id = ? ORDER BY workload_row_code
                     """,
+                    (version_id,),
+                ).fetchall()
+                replacement_rows = connection.execute(
+                    "SELECT * FROM teacher_replacements WHERE import_version_id = ? ORDER BY replacement_code",
                     (version_id,),
                 ).fetchall()
                 specialty_rows = connection.execute(
@@ -1188,6 +1262,12 @@ class SqliteImportRepository:
                     self._resource_unavailability_from_row(row)
                     for row in resource_unavailability_rows
                 ),
+                cycle_commissions=tuple(
+                    self._cycle_commission_from_row(row) for row in commission_rows
+                ),
+                teacher_replacements=tuple(
+                    self._teacher_replacement_from_row(row) for row in replacement_rows
+                ),
             )
         except ValidationError as error:
             raise StorageError("Database contains invalid stored data") from error
@@ -1204,7 +1284,30 @@ class SqliteImportRepository:
             max_hours_per_day=row["max_hours_per_day"],
             max_days_per_week=row["max_days_per_week"],
             home_building_code=row["home_building_code"],
+            cycle_commission_code=row["cycle_commission_code"],
             active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _cycle_commission_from_row(row: sqlite3.Row) -> CycleCommission:
+        return CycleCommission(
+            commission_code=row["commission_code"],
+            commission_name=row["commission_name"],
+            department=row["department"],
+            active=bool(row["active"]),
+        )
+
+    @staticmethod
+    def _teacher_replacement_from_row(row: sqlite3.Row) -> TeacherReplacement:
+        return TeacherReplacement(
+            replacement_code=row["replacement_code"],
+            academic_year=row["academic_year"],
+            original_teacher_code=row["original_teacher_code"],
+            substitute_teacher_code=row["substitute_teacher_code"],
+            starts_on=row["starts_on"],
+            ends_on=row["ends_on"],
+            workload_row_code=row["workload_row_code"],
+            reason=row["reason"],
         )
 
     @staticmethod

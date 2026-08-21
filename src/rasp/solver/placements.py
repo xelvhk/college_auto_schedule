@@ -186,6 +186,24 @@ def _availability_index(batch: ImportBatch) -> AvailabilityIndex:
     }
 
 
+def _effective_teacher_code(
+    batch: ImportBatch, workload: WorkloadItem, lesson_date: date
+) -> str:
+    matches = [
+        item
+        for item in batch.teacher_replacements
+        if item.academic_year == workload.academic_year
+        and item.original_teacher_code == workload.teacher_code
+        and item.starts_on <= lesson_date <= item.ends_on
+        and (item.workload_row_code is None or item.workload_row_code == workload.workload_row_code)
+    ]
+    if not matches:
+        return workload.teacher_code
+    # Ambiguous overlaps are rejected by readiness; a deterministic fallback keeps
+    # placement-domain construction total for preview and diagnostics.
+    return sorted(matches, key=lambda item: item.replacement_code)[0].substitute_teacher_code
+
+
 def _teaching_dates(
     batch: ImportBatch,
     workload: WorkloadItem,
@@ -320,6 +338,7 @@ def build_placement_domains(
         )
         cutoffs = _shortened_cutoffs(batch, workload.academic_year)
         for schedule_date, actual_date in teaching_dates:
+            effective_teacher_code = _effective_teacher_code(batch, workload, actual_date)
             for slots in sequences:
                 cutoff = cutoffs.get(actual_date)
                 if cutoff is not None and any(slot.ends_at > cutoff for slot in slots):
@@ -327,7 +346,7 @@ def build_placement_domains(
                 if not _resource_is_available(
                     availability,
                     ResourceType.TEACHER,
-                    workload.teacher_code,
+                    effective_teacher_code,
                     actual_date,
                     slots,
                 ) or not _resource_is_available(
@@ -353,6 +372,7 @@ def build_placement_domains(
                             teaching_week_start=_monday(schedule_date),
                             slot_codes=tuple(slot.slot_code for slot in slots),
                             room_code=room.room_code,
+                            teacher_code=effective_teacher_code,
                         )
                     )
                     total_options += 1

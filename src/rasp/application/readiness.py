@@ -325,6 +325,65 @@ def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
         academic_year.academic_year: academic_year
         for academic_year in imports.academic_years
     }
+    commissions = {
+        commission.commission_code: commission
+        for commission in imports.cycle_commissions
+    }
+    workload_codes = {workload.workload_row_code for workload in imports.workloads}
+    for teacher in imports.teachers:
+        if teacher.cycle_commission_code is not None:
+            commission = commissions.get(teacher.cycle_commission_code)
+            if commission is None or not commission.active:
+                issues.append(
+                    ReadinessIssue(
+                        severity=ReadinessSeverity.ERROR,
+                        code="inactive_teacher_cycle_commission",
+                        message="Цикловая комиссия преподавателя отсутствует или неактивна",
+                        section="cycle_commissions",
+                        object_code=teacher.teacher_code,
+                        remediation="Добавьте или активируйте цикловую комиссию преподавателя.",
+                    )
+                )
+    for replacement in imports.teacher_replacements:
+        original = teachers.get(replacement.original_teacher_code)
+        substitute = teachers.get(replacement.substitute_teacher_code)
+        checks = (
+            (original is not None and original.active, "inactive_replacement_original_teacher", "Основной преподаватель замены отсутствует или неактивен"),
+            (substitute is not None and substitute.active, "inactive_replacement_substitute_teacher", "Замещающий преподаватель отсутствует или неактивен"),
+            (replacement.workload_row_code is None or replacement.workload_row_code in workload_codes, "unknown_replacement_workload", "Строка нагрузки замены не найдена"),
+            (replacement.academic_year in academic_years and academic_years[replacement.academic_year].active, "inactive_replacement_academic_year", "Учебный год замены отсутствует или неактивен"),
+        )
+        for passed, code, message in checks:
+            if not passed:
+                issues.append(ReadinessIssue(
+                    severity=ReadinessSeverity.ERROR, code=code, message=message,
+                    section="teacher_replacements", object_code=replacement.replacement_code,
+                    remediation="Исправьте преподавателей или область действия замены.",
+                ))
+    ordered_replacements = sorted(
+        imports.teacher_replacements,
+        key=lambda item: (item.academic_year, item.original_teacher_code, item.starts_on, item.replacement_code),
+    )
+    for index, previous in enumerate(ordered_replacements):
+        for current in ordered_replacements[index + 1 :]:
+            if (current.academic_year, current.original_teacher_code) != (
+                previous.academic_year, previous.original_teacher_code
+            ):
+                break
+            applies_to_same_workload = (
+                previous.workload_row_code is None
+                or current.workload_row_code is None
+                or previous.workload_row_code == current.workload_row_code
+            )
+            if applies_to_same_workload and current.starts_on <= previous.ends_on:
+                issues.append(ReadinessIssue(
+                    severity=ReadinessSeverity.ERROR,
+                    code="overlapping_teacher_replacements",
+                    message="Для преподавателя заданы пересекающиеся замены",
+                    section="teacher_replacements",
+                    object_code=current.replacement_code,
+                    remediation="Скорректируйте даты или область действия замен.",
+                ))
     period_scopes = {
         (period.academic_year, period.semester)
         for period in imports.calendar_periods

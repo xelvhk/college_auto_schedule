@@ -71,7 +71,7 @@ class CpSatScheduleSolver:
                 for slot_code in placement.slot_codes:
                     for resource_type, resource_code in (
                         ("group", demand.group_code),
-                        ("teacher", demand.teacher_code),
+                        ("teacher", placement.teacher_code),
                         ("room", placement.room_code),
                     ):
                         resource_usage[
@@ -124,7 +124,7 @@ class CpSatScheduleSolver:
                 assignments.append(
                     ScheduleAssignment(
                         demand_code=demand.demand_code,
-                        teacher_code=demand.teacher_code,
+                        teacher_code=selected.teacher_code,
                         group_code=demand.group_code,
                         room_code=selected.room_code,
                         lesson_date=selected.lesson_date,

@@ -248,6 +248,8 @@
 
             <fieldset class="manual-section">
               <legend>Люди и группы</legend>
+              <div class="manual-list-heading"><h3>Цикловые комиссии</h3><button class="button button-secondary manual-add" type="button" data-add-row="cycle-commissions">Добавить комиссию</button></div>
+              <div class="manual-rows" id="manual-cycle-commissions" data-manual-kind="cycle-commissions"></div>
               <div class="manual-list-heading"><h3>Преподаватели</h3><button class="button button-secondary manual-add" type="button" data-add-row="teachers">Добавить преподавателя</button></div>
               <div class="manual-rows" id="manual-teachers" data-manual-kind="teachers"></div>
               <div class="manual-list-heading"><h3>Группы</h3><button class="button button-secondary manual-add" type="button" data-add-row="groups">Добавить группу</button></div>
@@ -260,6 +262,9 @@
               <div class="manual-rows" id="manual-disciplines" data-manual-kind="disciplines"></div>
               <div class="manual-list-heading"><h3>Нагрузка</h3><button class="button button-secondary manual-add" type="button" data-add-row="workloads">Добавить нагрузку</button></div>
               <div class="manual-rows" id="manual-workloads" data-manual-kind="workloads"></div>
+              <div class="manual-list-heading"><h3>Замены преподавателей</h3><button class="button button-secondary manual-add" type="button" data-add-row="teacher-replacements">Добавить замену</button></div>
+              <p class="hint">Код строки нагрузки можно не заполнять: тогда замена применяется ко всей нагрузке преподавателя.</p>
+              <div class="manual-rows" id="manual-teacher-replacements" data-manual-kind="teacher-replacements"></div>
             </fieldset>
 
             <fieldset class="manual-section">

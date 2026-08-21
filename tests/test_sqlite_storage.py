@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rasp.domain.models import (
     AcademicCycle,
+    CycleCommission,
     AcademicYear,
     BellSlot,
     Building,
@@ -24,6 +25,7 @@ from rasp.domain.models import (
     Specialty,
     Student,
     Teacher,
+    TeacherReplacement,
     WorkloadItem,
 )
 from rasp.storage.sqlite import (
@@ -228,6 +230,51 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertFalse(receipt.reused)
         self.assertEqual(restored, make_batch())
 
+    def test_persists_cycle_commissions_and_teacher_replacements(self) -> None:
+        base = make_batch()
+        substitute = Teacher(
+            teacher_code="T-002",
+            full_name="Петров Пётр Петрович",
+            yearly_assigned_hours=0,
+        )
+        batch = base.model_copy(
+            update={
+                "teachers": (
+                    base.teachers[0].model_copy(
+                        update={"cycle_commission_code": "CC-IT"}
+                    ),
+                    substitute,
+                ),
+                "cycle_commissions": (
+                    CycleCommission(
+                        commission_code="CC-IT",
+                        commission_name="Цикловая комиссия ИТ",
+                    ),
+                ),
+                "teacher_replacements": (
+                    TeacherReplacement(
+                        replacement_code="REP-001",
+                        academic_year="2026/2027",
+                        original_teacher_code="T-001",
+                        substitute_teacher_code="T-002",
+                        starts_on="2026-09-01",
+                        ends_on="2026-09-30",
+                    ),
+                ),
+            }
+        )
+
+        self.repository.activate_import(
+            batch, source_name="commissions.xlsx", source_sha256="b" * 64
+        )
+
+        restored = self.repository.get_active_batch()
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual(restored.cycle_commissions, batch.cycle_commissions)
+        self.assertEqual(restored.teacher_replacements, batch.teacher_replacements)
+        self.assertEqual(restored.teachers[0].cycle_commission_code, "CC-IT")
+
     def test_atomically_activates_and_restores_all_sections(self) -> None:
         receipt = self.repository.activate_import(
             make_full_batch(),
@@ -426,7 +473,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
         self.assertEqual(row, ("ИС-101", None))
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
 
     def test_migrates_legacy_workload_table_with_weekly_defaults(self) -> None:
         legacy_database = Path(self.temporary_directory.name) / "legacy-workload.sqlite3"
@@ -471,7 +518,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertIn("cycle_code", columns)
         self.assertIn("cycle_week_numbers", columns)
         self.assertEqual(columns["cycle_week_numbers"][4], "''")
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
 
     def test_corrupted_stored_record_returns_safe_storage_error(self) -> None:
         self.repository.activate_import(

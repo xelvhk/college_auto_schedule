@@ -24,6 +24,7 @@ from rasp.domain.models import (
     ResourceUnavailability,
     Specialty,
     Teacher,
+    TeacherReplacement,
     WorkloadItem,
 )
 
@@ -379,6 +380,38 @@ class ScheduleReadinessTests(unittest.TestCase):
         self.assertIn("inactive_workload_academic_year", codes)
         self.assertIn("missing_workload_period", codes)
         self.assertIn("missing_workload_bell_slots", codes)
+
+    def test_overlapping_global_and_workload_replacement_blocks_activation(self) -> None:
+        batch = make_ready_batch()
+        substitute = Teacher(
+            teacher_code="T-002",
+            full_name="Петров Пётр Петрович",
+            yearly_assigned_hours=0,
+        )
+        global_replacement = TeacherReplacement(
+            replacement_code="REP-ALL",
+            academic_year="2026/2027",
+            original_teacher_code="T-001",
+            substitute_teacher_code="T-002",
+            starts_on="2026-09-01",
+            ends_on="2026-09-10",
+        )
+        scoped_replacement = TeacherReplacement(
+            replacement_code="REP-W-001",
+            academic_year="2026/2027",
+            original_teacher_code="T-001",
+            substitute_teacher_code="T-002",
+            starts_on="2026-09-05",
+            ends_on="2026-09-15",
+            workload_row_code="W-001",
+        )
+
+        report = analyze_schedule_readiness(batch.model_copy(update={
+            "teachers": (*batch.teachers, substitute),
+            "teacher_replacements": (global_replacement, scoped_replacement),
+        }))
+
+        self.assertIn("overlapping_teacher_replacements", {issue.code for issue in report.issues})
 
     def test_warnings_do_not_block_and_order_is_deterministic(self) -> None:
         batch = make_ready_batch(hours=70).model_copy(

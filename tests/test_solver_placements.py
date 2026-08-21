@@ -10,6 +10,8 @@ from rasp.domain.models import (
     CalendarException,
     ResourceUnavailability,
     Room,
+    Teacher,
+    TeacherReplacement,
 )
 from rasp.imports.excel import read_import_workbook
 from rasp.solver import build_solver_problem
@@ -49,6 +51,32 @@ class SolverPlacementDomainTests(unittest.TestCase):
         self.assertEqual(options[0].room_code, "MAIN-201")
         self.assertEqual({item.room_code for item in options}, {"MAIN-201"})
         self.assertNotIn(date(2026, 10, 1), {item.lesson_date for item in options})
+
+    def test_dated_replacement_uses_substitute_teacher_in_placement_options(self) -> None:
+        substitute = Teacher(
+            teacher_code="T-002",
+            full_name="Петров Пётр Петрович",
+            yearly_assigned_hours=0,
+        )
+        replacement = TeacherReplacement(
+            replacement_code="REP-001",
+            academic_year="2026/2027",
+            original_teacher_code="T-001",
+            substitute_teacher_code="T-002",
+            starts_on="2026-09-01",
+            ends_on="2026-12-31",
+        )
+        _, options = self.options(
+            self.batch.model_copy(
+                update={
+                    "teachers": (*self.batch.teachers, substitute),
+                    "teacher_replacements": (replacement,),
+                }
+            )
+        )
+
+        self.assertTrue(options)
+        self.assertTrue(all(item.teacher_code == "T-002" for item in options))
 
     def test_five_day_week_excludes_saturday_but_explicit_working_day_adds_sunday(self) -> None:
         group = self.batch.groups[0].model_copy(update={"study_week_type": "five_days"})

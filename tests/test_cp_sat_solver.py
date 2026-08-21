@@ -46,6 +46,7 @@ def option(day: str, room: str = "R-001", *slots: str) -> PlacementOption:
         teaching_week_start="2026-08-31",
         slot_codes=slots or ("S-01",),
         room_code=room,
+        teacher_code="T-001",
     )
 
 
@@ -82,6 +83,7 @@ class CpSatScheduleSolverTests(unittest.TestCase):
                     ),
                     slot_codes=assignment.occupied_slot_codes,
                     room_code=assignment.room_code,
+                    teacher_code=assignment.teacher_code,
                 ),
                 domains[item.workload_row_code],
             )
