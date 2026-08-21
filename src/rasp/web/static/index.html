@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>Импорт данных — расписание колледжа</title>
+    <title>Исходные данные — расписание колледжа</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="/static/app.js" defer></script>
@@ -44,8 +44,26 @@
         </ol>
       </nav>
 
+      <section class="mode-selector" id="mode-selector" aria-labelledby="mode-title">
+        <div>
+          <p class="eyebrow">Начало работы</p>
+          <h1 id="mode-title">Как подготовить исходные данные?</h1>
+          <p>Выберите удобный способ. Оба режима создают локальную версию данных.</p>
+        </div>
+        <div class="mode-options" role="radiogroup" aria-label="Способ подготовки данных">
+          <button class="mode-option is-selected" type="button" data-mode="import" role="radio" aria-checked="true">
+            <strong>Импорт Excel</strong>
+            <span>Загрузить подготовленную книгу с листами данных</span>
+          </button>
+          <button class="mode-option" type="button" data-mode="manual" role="radio" aria-checked="false">
+            <strong>Ручной ввод</strong>
+            <span>Создать минимальный набор прямо в панели</span>
+          </button>
+        </div>
+      </section>
+
       <div class="workspace-grid">
-        <section class="workspace" aria-labelledby="page-title">
+        <section class="workspace" id="import-workspace" aria-labelledby="page-title">
           <div class="section-heading">
             <p class="eyebrow">Исходные данные</p>
             <h1 id="page-title">Импорт исходных данных</h1>
@@ -175,6 +193,89 @@
               </div>
             </div>
           </section>
+        </section>
+
+        <section class="workspace manual-workspace" id="manual-workspace" aria-labelledby="manual-title" hidden>
+          <div class="section-heading">
+            <p class="eyebrow">Ручной ввод</p>
+            <h2 id="manual-title">Создайте первый набор данных</h2>
+            <p>
+              Заполните календарь, ресурсы и учебную нагрузку. Поля с кодами связывают
+              строки между собой; перед активацией они повторно проверяются на сервере.
+            </p>
+          </div>
+
+          <form id="manual-form" novalidate>
+            <fieldset class="manual-section">
+              <legend>Версия и календарь</legend>
+              <div class="manual-fields three-columns">
+                <label>Название версии<input data-manual-base="source-name" value="Ручной ввод" maxlength="255" required /></label>
+                <label>Учебный год<input data-manual-base="academic-year" value="2026/2027" pattern="\d{4}/\d{4}" required /></label>
+                <label>Семестр<select data-manual-base="semester"><option value="1">1</option><option value="2">2</option></select></label>
+                <label>Начало учебного года<input data-manual-base="year-start" type="date" value="2026-09-01" required /></label>
+                <label>Конец учебного года<input data-manual-base="year-end" type="date" value="2027-06-30" required /></label>
+                <label>Код смены<input data-manual-base="shift-code" value="DAY" required /></label>
+                <label>Код периода<input data-manual-base="period-code" value="P-001" required /></label>
+                <label>Название периода<input data-manual-base="period-name" value="Осенний семестр" required /></label>
+                <label>Начало периода<input data-manual-base="period-start" type="date" value="2026-09-01" required /></label>
+                <label>Конец периода<input data-manual-base="period-end" type="date" value="2026-12-26" required /></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="manual-section">
+              <legend>Учебный план</legend>
+              <div class="manual-fields three-columns">
+                <label>Код специальности<input data-manual-base="specialty-code" value="09.02.07" required /></label>
+                <label>Название специальности<input data-manual-base="specialty-name" value="Информационные системы" required /></label>
+                <label>База<select data-manual-base="program-base"><option value="9">9 классов</option><option value="11">11 классов</option></select></label>
+                <label>Код учебного плана<input data-manual-base="curriculum-code" value="UP-001" required /></label>
+                <label>Год набора<input data-manual-base="admission-year" type="number" min="2000" max="2100" value="2026" required /></label>
+                <label>Редакция<input data-manual-base="curriculum-version" value="1.0" required /></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="manual-section">
+              <legend>Помещения</legend>
+              <div class="manual-fields three-columns">
+                <label>Код корпуса<input data-manual-base="building-code" value="B-1" required /></label>
+                <label>Название корпуса<input data-manual-base="building-name" value="Главный корпус" required /></label>
+                <label>Код типа помещения<input data-manual-base="room-type-code" value="CLASS" required /></label>
+                <label>Название типа<input data-manual-base="room-type-name" value="Учебная аудитория" required /></label>
+              </div>
+              <div class="manual-list-heading"><h3>Аудитории</h3><button class="button button-secondary manual-add" type="button" data-add-row="rooms">Добавить аудиторию</button></div>
+              <div class="manual-rows" id="manual-rooms" data-manual-kind="rooms"></div>
+            </fieldset>
+
+            <fieldset class="manual-section">
+              <legend>Люди и группы</legend>
+              <div class="manual-list-heading"><h3>Преподаватели</h3><button class="button button-secondary manual-add" type="button" data-add-row="teachers">Добавить преподавателя</button></div>
+              <div class="manual-rows" id="manual-teachers" data-manual-kind="teachers"></div>
+              <div class="manual-list-heading"><h3>Группы</h3><button class="button button-secondary manual-add" type="button" data-add-row="groups">Добавить группу</button></div>
+              <div class="manual-rows" id="manual-groups" data-manual-kind="groups"></div>
+            </fieldset>
+
+            <fieldset class="manual-section">
+              <legend>Дисциплины и нагрузка</legend>
+              <div class="manual-list-heading"><h3>Дисциплины</h3><button class="button button-secondary manual-add" type="button" data-add-row="disciplines">Добавить дисциплину</button></div>
+              <div class="manual-rows" id="manual-disciplines" data-manual-kind="disciplines"></div>
+              <div class="manual-list-heading"><h3>Нагрузка</h3><button class="button button-secondary manual-add" type="button" data-add-row="workloads">Добавить нагрузку</button></div>
+              <div class="manual-rows" id="manual-workloads" data-manual-kind="workloads"></div>
+            </fieldset>
+
+            <fieldset class="manual-section">
+              <legend>Сетка звонков</legend>
+              <div class="manual-list-heading"><h3>Интервалы</h3><button class="button button-secondary manual-add" type="button" data-add-row="bell-slots">Добавить интервал</button></div>
+              <div class="manual-rows" id="manual-bell-slots" data-manual-kind="bell-slots"></div>
+            </fieldset>
+
+            <div class="privacy-note">
+              <strong>Локальная обработка</strong>
+              <p>Данные сохраняются только в локальной версии после успешной проверки.</p>
+            </div>
+            <div class="form-actions">
+              <button class="button button-primary" id="manual-activate-button" type="submit">Проверить и активировать ручной набор</button>
+            </div>
+          </form>
         </section>
 
         <aside class="sidebar" aria-labelledby="history-title">

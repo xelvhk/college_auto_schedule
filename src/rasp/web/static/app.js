@@ -1,4 +1,4 @@
-const state = { file: null, previewValid: false, solverReady: false };
+const state = { file: null, previewValid: false, solverReady: false, entryMode: "import" };
 
 const elements = {
   form: document.querySelector("#import-form"),
@@ -53,6 +53,11 @@ const elements = {
   scheduleResult: document.querySelector("#schedule-result"),
   assignmentCount: document.querySelector("#assignment-count"),
   scheduleRows: document.querySelector("#schedule-rows"),
+  importWorkspace: document.querySelector("#import-workspace"),
+  manualWorkspace: document.querySelector("#manual-workspace"),
+  manualForm: document.querySelector("#manual-form"),
+  manualActivateButton: document.querySelector("#manual-activate-button"),
+  modeOptions: document.querySelectorAll("[data-mode]"),
 };
 
 function formatSize(bytes) {
@@ -443,6 +448,225 @@ async function activateVersion(versionId, button) {
   }
 }
 
+function setEntryMode(mode) {
+  state.entryMode = mode;
+  const manual = mode === "manual";
+  elements.importWorkspace.hidden = manual;
+  elements.manualWorkspace.hidden = !manual;
+  elements.modeOptions.forEach((option) => {
+    const selected = option.dataset.mode === mode;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-checked", String(selected));
+  });
+  clearMessage();
+  if (manual) {
+    elements.manualWorkspace.querySelector("input").focus();
+  }
+}
+
+const manualRowFields = {
+  rooms: [
+    ["room-code", "Код", "R-101"],
+    ["room-name", "Название", "Аудитория 101"],
+    ["capacity", "Вместимость", "30", "number"],
+  ],
+  teachers: [
+    ["teacher-code", "Код", "T-001"],
+    ["full-name", "ФИО", "Иванов Иван Иванович"],
+    ["department", "Подразделение", "ЦК ИТ"],
+  ],
+  groups: [
+    ["group-code", "Код", "ИС-101"],
+    ["course", "Курс", "1", "number"],
+    ["headcount", "Студентов", "25", "number"],
+    ["study-week-type", "Неделя", "five_days", "select", [["five_days", "Пять дней"], ["six_days", "Шесть дней"]]],
+  ],
+  disciplines: [
+    ["discipline-code", "Код", "MDK.01.01"],
+    ["discipline-name", "Название", "Основы программирования"],
+    ["planned-hours", "Часов по плану", "2", "number"],
+    ["lesson-type", "Вид", "lecture", "select", [["lecture", "Лекция"], ["practice", "Практика"], ["lab", "Лабораторная"]]],
+  ],
+  workloads: [
+    ["workload-code", "Код строки", "W-001"],
+    ["group-code", "Группа", "ИС-101"],
+    ["discipline-code", "Дисциплина", "MDK.01.01"],
+    ["teacher-code", "Преподаватель", "T-001"],
+    ["total-hours", "Всего часов", "2", "number"],
+    ["event-hours", "Часов в занятии", "2", "number"],
+    ["lesson-type", "Вид", "lecture", "select", [["lecture", "Лекция"], ["practice", "Практика"], ["lab", "Лабораторная"]]],
+  ],
+  "bell-slots": [
+    ["slot-code", "Код", "DAY-01"],
+    ["lesson-number", "№ пары", "1", "number"],
+    ["starts-at", "Начало", "09:00", "time"],
+    ["ends-at", "Конец", "10:30", "time"],
+  ],
+};
+
+function createManualRow(kind) {
+  const rows = document.querySelector(`#manual-${kind}`);
+  const index = rows.children.length + 1;
+  const row = document.createElement("div");
+  row.className = "manual-row";
+  manualRowFields[kind].forEach(([field, label, value, type = "text", choices]) => {
+    const wrapper = document.createElement("label");
+    wrapper.textContent = label;
+    let control;
+    if (type === "select") {
+      control = document.createElement("select");
+      choices.forEach(([choiceValue, choiceLabel]) => {
+        const option = document.createElement("option");
+        option.value = choiceValue;
+        option.textContent = choiceLabel;
+        control.append(option);
+      });
+    } else {
+      control = document.createElement("input");
+      control.type = type;
+      if (type === "number") control.min = "1";
+    }
+    control.dataset.field = field;
+    control.required = true;
+    control.value = index === 1 ? value : field.includes("code") ? `${value}-${index}` : value;
+    wrapper.append(control);
+    row.append(wrapper);
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "button-link manual-remove";
+  remove.textContent = "Удалить";
+  remove.addEventListener("click", () => row.remove());
+  row.append(remove);
+  rows.append(row);
+}
+
+function manualBase(name) {
+  return elements.manualForm.querySelector(`[data-manual-base="${name}"]`).value.trim();
+}
+
+function manualRows(kind) {
+  return [...document.querySelector(`#manual-${kind}`).children].map((row) => {
+    const values = {};
+    row.querySelectorAll("[data-field]").forEach((input) => {
+      values[input.dataset.field] = input.value.trim();
+    });
+    return values;
+  });
+}
+
+function manualNumber(value) {
+  return Number(value);
+}
+
+function buildManualBatch() {
+  const academicYear = manualBase("academic-year");
+  const semester = manualNumber(manualBase("semester"));
+  const curriculumCode = manualBase("curriculum-code");
+  const specialtyCode = manualBase("specialty-code");
+  const buildingCode = manualBase("building-code");
+  const roomTypeCode = manualBase("room-type-code");
+  const disciplines = manualRows("disciplines").map((row) => ({
+    curriculum_code: curriculumCode,
+    discipline_code: row["discipline-code"],
+    discipline_name: row["discipline-name"],
+    semester,
+    lesson_type: row["lesson-type"],
+    planned_hours: manualNumber(row["planned-hours"]),
+  }));
+  const disciplineNames = new Map(disciplines.map((item) => [item.discipline_code, item.discipline_name]));
+  const workloads = manualRows("workloads").map((row) => ({
+    workload_row_code: row["workload-code"],
+    academic_year: academicYear,
+    semester,
+    discipline_code: row["discipline-code"],
+    discipline_name: disciplineNames.get(row["discipline-code"]) || row["discipline-code"],
+    group_code: row["group-code"],
+    teacher_code: row["teacher-code"],
+    lesson_type: row["lesson-type"],
+    total_academic_hours: manualNumber(row["total-hours"]),
+    event_duration_hours: manualNumber(row["event-hours"]),
+    room_type: roomTypeCode,
+  }));
+  const assignedHours = new Map();
+  workloads.forEach((item) => assignedHours.set(item.teacher_code, (assignedHours.get(item.teacher_code) || 0) + item.total_academic_hours));
+
+  return {
+    teachers: manualRows("teachers").map((row) => ({
+      teacher_code: row["teacher-code"],
+      full_name: row["full-name"],
+      department: row.department || null,
+      yearly_assigned_hours: assignedHours.get(row["teacher-code"]) || 0,
+      active: true,
+    })),
+    groups: manualRows("groups").map((row) => ({
+      group_code: row["group-code"],
+      specialty_code: specialtyCode,
+      curriculum_code: curriculumCode,
+      course: manualNumber(row.course),
+      education_form: "full_time",
+      headcount: manualNumber(row.headcount),
+      program_base: manualBase("program-base"),
+      study_week_type: row["study-week-type"],
+      subgroup_count: 1,
+    })),
+    workloads,
+    specialties: [{
+      specialty_code: specialtyCode,
+      specialty_name: manualBase("specialty-name"),
+      program_base: manualBase("program-base"),
+      education_form: "full_time",
+      active: true,
+    }],
+    curricula: [{
+      curriculum_code: curriculumCode,
+      specialty_code: specialtyCode,
+      admission_year: manualNumber(manualBase("admission-year")),
+      version: manualBase("curriculum-version"),
+      valid_from: manualBase("year-start"),
+      valid_to: manualBase("year-end"),
+      status: "active",
+    }],
+    disciplines,
+    buildings: [{ building_code: buildingCode, building_name: manualBase("building-name"), active: true }],
+    room_types: [{ room_type_code: roomTypeCode, room_type_name: manualBase("room-type-name"), active: true }],
+    rooms: manualRows("rooms").map((row) => ({
+      room_code: row["room-code"], room_name: row["room-name"], building_code: buildingCode,
+      room_type_code: roomTypeCode, capacity: manualNumber(row.capacity), active: true,
+    })),
+    academic_years: [{ academic_year: academicYear, starts_on: manualBase("year-start"), ends_on: manualBase("year-end"), active: true }],
+    calendar_periods: [{
+      period_code: manualBase("period-code"), academic_year: academicYear, period_name: manualBase("period-name"),
+      period_type: "teaching", starts_on: manualBase("period-start"), ends_on: manualBase("period-end"), semester,
+    }],
+    bell_slots: manualRows("bell-slots").map((row) => ({
+      slot_code: row["slot-code"], academic_year: academicYear, shift_code: manualBase("shift-code"),
+      lesson_number: manualNumber(row["lesson-number"]), starts_at: row["starts-at"], ends_at: row["ends-at"],
+    })),
+  };
+}
+
+async function activateManualData(event) {
+  event.preventDefault();
+  if (!elements.manualForm.reportValidity()) return;
+  clearMessage();
+  setBusy(elements.manualActivateButton, true);
+  try {
+    const response = await fetch("/api/manual-data/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceName: manualBase("source-name"), batch: buildManualBatch() }),
+    });
+    const payload = await parseResponse(response);
+    setMessage("success", `Ручная версия №${payload.versionId} активирована`);
+    await loadStatus();
+  } catch (error) {
+    setMessage("error", error.message, error.payload?.issues || []);
+  } finally {
+    setBusy(elements.manualActivateButton, false);
+  }
+}
+
 elements.fileInput.addEventListener("change", () => setFile(elements.fileInput.files[0] || null));
 elements.clearFile.addEventListener("click", () => setFile(null));
 elements.form.addEventListener("submit", (event) => {
@@ -450,6 +674,9 @@ elements.form.addEventListener("submit", (event) => {
   previewFile();
 });
 elements.activateButton.addEventListener("click", activateFile);
+elements.manualForm.addEventListener("submit", activateManualData);
+elements.modeOptions.forEach((option) => option.addEventListener("click", () => setEntryMode(option.dataset.mode)));
+document.querySelectorAll("[data-add-row]").forEach((button) => button.addEventListener("click", () => createManualRow(button.dataset.addRow)));
 elements.refreshStatus.addEventListener("click", loadStatus);
 elements.solveButton.addEventListener("click", runSolver);
 
@@ -470,4 +697,5 @@ elements.uploadZone.addEventListener("drop", (event) => {
   if (file) setFile(file);
 });
 
+Object.keys(manualRowFields).forEach(createManualRow);
 loadStatus();

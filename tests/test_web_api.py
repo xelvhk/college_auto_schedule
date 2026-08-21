@@ -52,7 +52,11 @@ class WebApiTests(unittest.TestCase):
         self.assertIn('id="academic-cycle-count"', response.text)
         self.assertIn('id="solve-button"', response.text)
         self.assertIn('id="schedule-result"', response.text)
+        self.assertIn('id="mode-selector"', response.text)
+        self.assertIn('id="manual-workspace"', response.text)
+        self.assertIn('id="manual-activate-button"', response.text)
         self.assertIn("renderReadiness(payload.readiness)", script.text)
+        self.assertIn('fetch("/api/manual-data/activate"', script.text)
         self.assertIn('fetch("/api/solver/runs"', script.text)
         self.assertIn("renderSchedule(payload)", script.text)
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -220,6 +224,26 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["issues"][0]["code"], "discipline_not_in_curriculum")
+        self.assertEqual(self.client.get("/api/status").json()["activeVersionId"], 1)
+
+    def test_incomplete_manual_data_does_not_replace_active_version(self) -> None:
+        valid_batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
+        self.client.post(
+            "/api/manual-data/activate",
+            json={"batch": valid_batch.model_dump(mode="json")},
+        )
+        incomplete_batch = valid_batch.model_copy(update={"teachers": ()})
+
+        response = self.client.post(
+            "/api/manual-data/activate",
+            json={"batch": incomplete_batch.model_dump(mode="json")},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(
+            "missing_teachers",
+            {issue["code"] for issue in response.json()["issues"]},
+        )
         self.assertEqual(self.client.get("/api/status").json()["activeVersionId"], 1)
 
     def test_preview_reports_workload_without_matching_room(self) -> None:
