@@ -95,6 +95,10 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(payload["solverProblem"]["eligibleWeekCount"], 9)
         self.assertEqual(payload["solverProblem"]["placementDomainCount"], 1)
         self.assertEqual(payload["solverProblem"]["placementOptionCount"], 50)
+        self.assertEqual(
+            payload["solverProblem"]["estimatedBooleanVariableCount"],
+            1_800,
+        )
         self.assertEqual(payload["samples"]["groups"][0]["groupCode"], "ИС-101")
         self.assertFalse(self.database_path.exists())
 

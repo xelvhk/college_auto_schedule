@@ -1,5 +1,9 @@
 from rasp.solver.conflicts import find_assignment_conflicts
 from rasp.solver.cp_sat import CpSatScheduleSolver
+from rasp.solver.complexity import (
+    SolverComplexityEstimate,
+    estimate_solver_complexity,
+)
 from rasp.solver.contracts import (
     DiagnosticSeverity,
     LessonDemand,
@@ -20,6 +24,7 @@ from rasp.solver.presentation import solver_problem_payload, solver_result_paylo
 
 __all__ = [
     "CpSatScheduleSolver",
+    "SolverComplexityEstimate",
     "DiagnosticSeverity",
     "LessonDemand",
     "MAX_SOLVER_SEED",
@@ -34,6 +39,7 @@ __all__ = [
     "SolverStatus",
     "WorkloadPlacementDomain",
     "build_solver_problem",
+    "estimate_solver_complexity",
     "find_assignment_conflicts",
     "solver_problem_payload",
     "solver_result_payload",

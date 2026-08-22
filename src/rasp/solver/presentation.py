@@ -6,6 +6,7 @@ from rasp.solver.contracts import (
     SolverProblem,
     SolverResult,
 )
+from rasp.solver.complexity import estimate_solver_complexity
 
 
 def _diagnostic_payload(diagnostic: SolverDiagnostic) -> dict[str, object]:
@@ -25,6 +26,7 @@ def _diagnostic_payload(diagnostic: SolverDiagnostic) -> dict[str, object]:
 
 
 def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
+    complexity = estimate_solver_complexity(problem)
     eligible_weeks = {
         week
         for demand in problem.demands
@@ -38,6 +40,14 @@ def solver_problem_payload(problem: SolverProblem) -> dict[str, object]:
         "placementDomainCount": len(problem.placement_domains),
         "placementOptionCount": sum(
             len(domain.options) for domain in problem.placement_domains
+        ),
+        "estimatedBooleanVariableCount": complexity.boolean_variable_count,
+        "estimatedConstraintCount": (
+            complexity.exactly_one_constraint_count
+            + complexity.ordering_constraint_count
+        ),
+        "estimatedResourceReferenceCount": (
+            complexity.resource_usage_reference_count
         ),
         "errorCount": sum(
             item.severity is DiagnosticSeverity.ERROR

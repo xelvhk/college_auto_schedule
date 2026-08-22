@@ -79,3 +79,36 @@ jobs:
           'rasp/web/static/app.js', 'rasp/web/static/favicon.svg'};
           missing = sorted(required - names);
           assert not missing, f'Missing packaged assets: {missing}'"
+
+  benchmark:
+    name: Small deterministic solver benchmark
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project
+        run: python -m pip install .
+
+      - name: Run small benchmark
+        run: >-
+          python scripts/run_solver_benchmark.py
+          --output artifacts/benchmarks/solver-small.json
+          --time-limit 30
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: solver-small-benchmark
+          path: artifacts/benchmarks/solver-small.json
+          if-no-files-found: error
+          retention-days: 14

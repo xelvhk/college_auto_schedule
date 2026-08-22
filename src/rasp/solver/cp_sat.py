@@ -13,6 +13,10 @@ from rasp.solver.contracts import (
     SolverResult,
     SolverStatus,
 )
+from rasp.solver.complexity import estimate_solver_complexity
+
+
+MAX_CP_SAT_BOOLEAN_VARIABLES = 2_000_000
 
 
 class CpSatScheduleSolver:
@@ -51,6 +55,19 @@ class CpSatScheduleSolver:
                 options,
                 "missing_placement_domain",
                 "Для части нагрузки отсутствуют допустимые размещения.",
+            )
+
+        complexity = estimate_solver_complexity(problem)
+        if complexity.boolean_variable_count > MAX_CP_SAT_BOOLEAN_VARIABLES:
+            return self._not_started(
+                problem,
+                options,
+                "solver_variable_limit_exceeded",
+                (
+                    "Расчёт не запущен: полная модель потребовала бы "
+                    f"{complexity.boolean_variable_count:,} булевых переменных "
+                    f"при безопасном пределе {MAX_CP_SAT_BOOLEAN_VARIABLES:,}."
+                ),
             )
 
         from ortools.sat.python import cp_model

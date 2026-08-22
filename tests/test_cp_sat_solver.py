@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -18,6 +19,7 @@ from rasp.solver import (
     SolverStatus,
     WorkloadPlacementDomain,
     build_solver_problem,
+    estimate_solver_complexity,
     find_assignment_conflicts,
 )
 
@@ -165,6 +167,64 @@ class CpSatScheduleSolverTests(unittest.TestCase):
         for value in (-1, 2_147_483_648):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 SolverOptions(seed=value)
+
+    def test_complexity_estimate_counts_future_boolean_variables(self) -> None:
+        problem = SolverProblem(
+            source_workload_count=1,
+            demands=(
+                demand("W-001#001", "W-001"),
+                demand("W-001#002", "W-001"),
+                demand("W-001#003", "W-001"),
+            ),
+            diagnostics=(),
+            placement_domains=(
+                WorkloadPlacementDomain(
+                    workload_row_code="W-001",
+                    options=(
+                        option("2026-09-01", "R-001", "S-01", "S-02"),
+                        option("2026-09-02", "R-001", "S-01", "S-02"),
+                    ),
+                ),
+            ),
+        )
+
+        estimate = estimate_solver_complexity(problem)
+
+        self.assertEqual(estimate.lesson_demand_count, 3)
+        self.assertEqual(estimate.placement_option_count, 2)
+        self.assertEqual(estimate.boolean_variable_count, 6)
+        self.assertEqual(estimate.ordering_constraint_count, 2)
+        self.assertEqual(estimate.resource_usage_reference_count, 36)
+
+    def test_excessive_boolean_variable_estimate_blocks_solver(self) -> None:
+        problem = SolverProblem(
+            source_workload_count=1,
+            demands=(
+                demand("W-001#001", "W-001"),
+                demand("W-001#002", "W-001"),
+                demand("W-001#003", "W-001"),
+            ),
+            diagnostics=(),
+            placement_domains=(
+                WorkloadPlacementDomain(
+                    workload_row_code="W-001",
+                    options=(
+                        option("2026-09-01"),
+                        option("2026-09-02"),
+                    ),
+                ),
+            ),
+        )
+
+        with patch("rasp.solver.cp_sat.MAX_CP_SAT_BOOLEAN_VARIABLES", 5):
+            result = CpSatScheduleSolver().solve(problem, SolverOptions())
+
+        self.assertEqual(result.status, SolverStatus.NOT_STARTED)
+        self.assertEqual(result.assignments, ())
+        self.assertEqual(
+            result.diagnostics[-1].code,
+            "solver_variable_limit_exceeded",
+        )
 
 
 if __name__ == "__main__":
