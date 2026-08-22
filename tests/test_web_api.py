@@ -229,7 +229,7 @@ class WebApiTests(unittest.TestCase):
         self.upload("/api/imports/activate", "valid-import.xlsx")
 
         with patch(
-            "rasp.web.app.CpSatScheduleSolver.solve",
+            "rasp.web.app.solve_schedule_batch",
             side_effect=RuntimeError("private runtime detail"),
         ):
             response = self.client.post("/api/solver/runs", json={})

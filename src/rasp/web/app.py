@@ -32,13 +32,13 @@ from rasp.imports.excel import (
     read_import_workbook,
 )
 from rasp.solver import (
-    CpSatScheduleSolver,
     MAX_SOLVER_SEED,
     SolverMode,
     SolverOptions,
     build_solver_problem,
     solver_problem_payload,
     solver_result_payload,
+    solve_schedule_batch,
 )
 from rasp.storage.sqlite import (
     SqliteImportRepository,
@@ -326,10 +326,9 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise ApiError(500, "storage_error", str(error)) from error
         if batch is None:
             raise ApiError(409, "no_active_import", "Нет активной версии данных")
-        problem = build_solver_problem(batch)
         try:
-            result = CpSatScheduleSolver().solve(
-                problem,
+            problem, result = solve_schedule_batch(
+                batch,
                 SolverOptions(
                     mode=request.mode,
                     seed=request.seed,

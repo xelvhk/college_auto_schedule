@@ -23,6 +23,7 @@ from rasp.solver.placements import build_placement_domains
 
 
 MAX_LESSON_DEMANDS = 100_000
+TWO_STAGE_DEMAND_THRESHOLD = 5_000
 
 
 def _monday(day: date) -> date:
@@ -104,7 +105,11 @@ def _sort_diagnostics(diagnostics: list[SolverDiagnostic]) -> None:
     )
 
 
-def build_solver_problem(batch: ImportBatch) -> SolverProblem:
+def build_solver_problem(
+    batch: ImportBatch,
+    *,
+    defer_placement_domains: bool = False,
+) -> SolverProblem:
     """Deterministically expand validated workload rows into lesson demands."""
 
     demands: list[LessonDemand] = []
@@ -180,6 +185,26 @@ def build_solver_problem(batch: ImportBatch) -> SolverProblem:
                     eligible_week_starts=eligible_weeks,
                 )
             )
+
+    if defer_placement_domains or demand_count > TWO_STAGE_DEMAND_THRESHOLD:
+        diagnostics.append(
+            SolverDiagnostic(
+                severity=DiagnosticSeverity.WARNING,
+                code="two_stage_solver_required",
+                message=(
+                    "Семестровые варианты будут размещаться "
+                    "по неделям, "
+                    "чтобы ограничить размер модели"
+                ),
+                section="solver",
+            )
+        )
+        _sort_diagnostics(diagnostics)
+        return SolverProblem(
+            source_workload_count=len(ordered_workloads),
+            demands=tuple(demands),
+            diagnostics=tuple(diagnostics),
+        )
 
     placement_domains, placement_diagnostics = build_placement_domains(batch)
     diagnostics.extend(placement_diagnostics)

@@ -17,10 +17,12 @@ from rasp.solver import (
     SolverOptions,
     SolverProblem,
     SolverStatus,
+    TwoStageScheduleSolver,
     WorkloadPlacementDomain,
     build_solver_problem,
     estimate_solver_complexity,
     find_assignment_conflicts,
+    solve_schedule_batch,
 )
 
 
@@ -225,6 +227,34 @@ class CpSatScheduleSolverTests(unittest.TestCase):
             result.diagnostics[-1].code,
             "solver_variable_limit_exceeded",
         )
+
+    def test_two_stage_solver_places_demands_week_by_week(self) -> None:
+        batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
+
+        result = TwoStageScheduleSolver(room_candidate_limit=1).solve_batch(
+            batch,
+            SolverOptions(seed=3, time_limit_seconds=30),
+        )
+
+        self.assertEqual(result.status, SolverStatus.FEASIBLE)
+        self.assertEqual(len(result.assignments), 36)
+        self.assertEqual(find_assignment_conflicts(result.assignments), ())
+
+    def test_solver_service_selects_two_stage_strategy_for_large_problem(self) -> None:
+        batch = read_import_workbook(FIXTURES / "valid-import.xlsx")
+
+        with patch("rasp.solver.preparation.TWO_STAGE_DEMAND_THRESHOLD", 35):
+            problem, result = solve_schedule_batch(
+                batch,
+                SolverOptions(seed=3, time_limit_seconds=30),
+            )
+
+        self.assertIn(
+            "two_stage_solver_required",
+            {item.code for item in problem.diagnostics},
+        )
+        self.assertEqual(result.status, SolverStatus.FEASIBLE)
+        self.assertEqual(len(result.assignments), 36)
 
 
 if __name__ == "__main__":

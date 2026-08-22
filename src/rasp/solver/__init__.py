@@ -21,6 +21,8 @@ from rasp.solver.contracts import (
 )
 from rasp.solver.preparation import build_solver_problem
 from rasp.solver.presentation import solver_problem_payload, solver_result_payload
+from rasp.solver.service import solve_schedule_batch
+from rasp.solver.two_stage import TwoStageScheduleSolver, TwoStageSolverMetrics
 
 __all__ = [
     "CpSatScheduleSolver",
@@ -37,10 +39,13 @@ __all__ = [
     "SolverProblem",
     "SolverResult",
     "SolverStatus",
+    "TwoStageScheduleSolver",
+    "TwoStageSolverMetrics",
     "WorkloadPlacementDomain",
     "build_solver_problem",
     "estimate_solver_complexity",
     "find_assignment_conflicts",
     "solver_problem_payload",
     "solver_result_payload",
+    "solve_schedule_batch",
 ]

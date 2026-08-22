@@ -114,10 +114,13 @@ def _matching_rooms(
     batch: ImportBatch,
     workload: WorkloadItem,
     group: Group,
+    *,
+    candidate_limit: int | None = None,
+    candidate_offset: int = 0,
 ) -> tuple[Room, ...]:
     required_capacity = workload.room_capacity or group.headcount
     required_equipment = set(workload.required_equipment_codes)
-    return tuple(
+    rooms = tuple(
         sorted(
             (
                 room
@@ -132,6 +135,17 @@ def _matching_rooms(
             ),
             key=lambda item: item.room_code,
         )
+    )
+    if candidate_limit is None or len(rooms) <= candidate_limit:
+        return rooms
+    stable_offset = sum(
+        (index + 1) * ord(character)
+        for index, character in enumerate(workload.workload_row_code)
+    )
+    start = (stable_offset + candidate_offset * candidate_limit) % len(rooms)
+    return tuple(
+        rooms[(start + index) % len(rooms)]
+        for index in range(candidate_limit)
     )
 
 
@@ -195,7 +209,10 @@ def _effective_teacher_code(
         if item.academic_year == workload.academic_year
         and item.original_teacher_code == workload.teacher_code
         and item.starts_on <= lesson_date <= item.ends_on
-        and (item.workload_row_code is None or item.workload_row_code == workload.workload_row_code)
+        and (
+            item.workload_row_code is None
+            or item.workload_row_code == workload.workload_row_code
+        )
     ]
     if not matches:
         return workload.teacher_code
@@ -283,6 +300,11 @@ def _shortened_cutoffs(batch: ImportBatch, academic_year: str) -> dict[date, tim
 
 def build_placement_domains(
     batch: ImportBatch,
+    *,
+    workload_codes: set[str] | None = None,
+    teaching_week_starts: set[date] | None = None,
+    room_candidate_limit: int | None = None,
+    room_candidate_offset: int = 0,
 ) -> tuple[tuple[WorkloadPlacementDomain, ...], tuple[SolverDiagnostic, ...]]:
     diagnostics: list[SolverDiagnostic] = []
     domains: list[WorkloadPlacementDomain] = []
@@ -308,7 +330,13 @@ def build_placement_domains(
     groups = {item.group_code: item for item in batch.groups}
     availability = _availability_index(batch)
     total_options = 0
-    for workload in sorted(batch.workloads, key=lambda item: item.workload_row_code):
+    workloads = (
+        workload
+        for workload in batch.workloads
+        if workload_codes is None
+        or workload.workload_row_code in workload_codes
+    )
+    for workload in sorted(workloads, key=lambda item: item.workload_row_code):
         group = groups.get(workload.group_code)
         options: list[PlacementOption] = []
         if group is not None and group.study_week_type not in STUDY_WEEK_DAYS:
@@ -332,12 +360,27 @@ def build_placement_domains(
             relevant_slots,
             workload.event_duration_hours,
         )
-        rooms = _matching_rooms(batch, workload, group) if group is not None else ()
+        rooms = (
+            _matching_rooms(
+                batch,
+                workload,
+                group,
+                candidate_limit=room_candidate_limit,
+                candidate_offset=room_candidate_offset,
+            )
+            if group is not None
+            else ()
+        )
         teaching_dates = (
             _teaching_dates(batch, workload, group) if group is not None else ()
         )
         cutoffs = _shortened_cutoffs(batch, workload.academic_year)
         for schedule_date, actual_date in teaching_dates:
+            if (
+                teaching_week_starts is not None
+                and _monday(schedule_date) not in teaching_week_starts
+            ):
+                continue
             effective_teacher_code = _effective_teacher_code(batch, workload, actual_date)
             for slots in sequences:
                 cutoff = cutoffs.get(actual_date)

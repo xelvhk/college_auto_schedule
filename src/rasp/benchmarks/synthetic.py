@@ -72,7 +72,7 @@ def build_synthetic_college(
     """Build a stable medium-college dataset without personal or external data."""
 
     scale = scale or SyntheticCollegeScale()
-    workload_hours = scale.events_per_workload * 2
+    workload_hours = scale.events_per_workload
     workload_count = scale.group_count * scale.disciplines_per_group
     teacher_workloads = Counter(
         workload_index % scale.teacher_count
@@ -131,7 +131,7 @@ def build_synthetic_college(
                     teacher_code=f"T-{teacher_index + 1:03d}",
                     lesson_type="practice",
                     total_academic_hours=workload_hours,
-                    event_duration_hours=2,
+                    event_duration_hours=1,
                     recurrence="weekly",
                     room_type="GENERAL",
                     room_capacity=scale.students_per_group,

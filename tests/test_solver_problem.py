@@ -86,6 +86,18 @@ class SolverProblemTests(unittest.TestCase):
             {diagnostic.code for diagnostic in problem.diagnostics},
         )
 
+    def test_large_problem_defers_semester_placement_domains(self) -> None:
+        with patch("rasp.solver.preparation.TWO_STAGE_DEMAND_THRESHOLD", 35):
+            problem = build_solver_problem(self.batch)
+
+        self.assertEqual(len(problem.demands), 36)
+        self.assertEqual(problem.placement_domains, ())
+        self.assertTrue(problem.is_ready)
+        self.assertIn(
+            "two_stage_solver_required",
+            {item.code for item in problem.diagnostics},
+        )
+
 
 class AssignmentConflictTests(unittest.TestCase):
     def assignment(self, demand_code: str, **changes: object) -> ScheduleAssignment:

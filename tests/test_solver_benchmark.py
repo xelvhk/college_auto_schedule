@@ -67,6 +67,7 @@ class SyntheticSolverBenchmarkTests(unittest.TestCase):
         self.assertEqual(report.completion_ratio, 1)
         self.assertEqual(report.hard_conflict_count, 0)
         self.assertGreater(report.peak_memory_bytes, 0)
+        self.assertGreater(report.python_peak_memory_bytes, 0)
 
 
 if __name__ == "__main__":

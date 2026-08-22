@@ -14,13 +14,13 @@ from rasp.application.readiness import ReadinessIssue, analyze_schedule_readines
 from rasp.domain.models import ImportBatch
 from rasp.imports.excel import ImportValidationError, read_import_workbook
 from rasp.solver import (
-    CpSatScheduleSolver,
     MAX_SOLVER_SEED,
     SolverOptions,
     SolverStatus,
     build_solver_problem,
     solver_problem_payload,
     solver_result_payload,
+    solve_schedule_batch,
 )
 from rasp.storage.sqlite import (
     SqliteImportRepository,
@@ -372,9 +372,8 @@ def _solve(database_path: Path, seed: int, time_limit: int) -> int:
             }
         )
         return 5
-    problem = build_solver_problem(batch)
-    result = CpSatScheduleSolver().solve(
-        problem,
+    problem, result = solve_schedule_batch(
+        batch,
         SolverOptions(seed=seed, time_limit_seconds=time_limit),
     )
     _print_json(solver_result_payload(result, problem))
