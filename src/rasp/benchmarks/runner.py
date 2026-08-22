@@ -48,7 +48,8 @@ class SolverBenchmarkReport(BaseModel):
 
 def _process_peak_memory_bytes() -> int:
     if sys.platform == "win32":
-        from ctypes import windll
+        from ctypes import POINTER, WinDLL, get_last_error
+        from ctypes.wintypes import BOOL, HANDLE
 
         class ProcessMemoryCounters(Structure):
             _fields_ = (
@@ -66,13 +67,26 @@ def _process_peak_memory_bytes() -> int:
 
         counters = ProcessMemoryCounters()
         counters.cb = sizeof(counters)
-        process = windll.kernel32.GetCurrentProcess()
-        if not windll.psapi.GetProcessMemoryInfo(
+        kernel32 = WinDLL("kernel32", use_last_error=True)
+        psapi = WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.argtypes = ()
+        kernel32.GetCurrentProcess.restype = HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = (
+            HANDLE,
+            POINTER(ProcessMemoryCounters),
+            DWORD,
+        )
+        psapi.GetProcessMemoryInfo.restype = BOOL
+        process = kernel32.GetCurrentProcess()
+        if not psapi.GetProcessMemoryInfo(
             process,
             byref(counters),
             counters.cb,
         ):
-            return 0
+            raise OSError(
+                get_last_error(),
+                "Unable to read process peak working set",
+            )
         return int(counters.peak_working_set_size)
 
     import resource

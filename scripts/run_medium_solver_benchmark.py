@@ -32,6 +32,7 @@ def main() -> int:
         and report.completion_ratio == 1
         and report.hard_conflict_count == 0
         and report.preparation_seconds + report.solving_seconds <= 300
+        and report.peak_memory_bytes > 0
         and report.peak_memory_bytes <= 4 * 1024**3
     )
     return 0 if passed else 1
