@@ -329,7 +329,9 @@ def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
         commission.commission_code: commission
         for commission in imports.cycle_commissions
     }
-    workload_codes = {workload.workload_row_code for workload in imports.workloads}
+    workloads = {
+        workload.workload_row_code: workload for workload in imports.workloads
+    }
     for teacher in imports.teachers:
         if teacher.cycle_commission_code is not None:
             commission = commissions.get(teacher.cycle_commission_code)
@@ -347,11 +349,50 @@ def analyze_schedule_readiness(imports: ImportBatch) -> ReadinessReport:
     for replacement in imports.teacher_replacements:
         original = teachers.get(replacement.original_teacher_code)
         substitute = teachers.get(replacement.substitute_teacher_code)
+        academic_year = academic_years.get(replacement.academic_year)
+        workload = workloads.get(replacement.workload_row_code or "")
         checks = (
-            (original is not None and original.active, "inactive_replacement_original_teacher", "Основной преподаватель замены отсутствует или неактивен"),
-            (substitute is not None and substitute.active, "inactive_replacement_substitute_teacher", "Замещающий преподаватель отсутствует или неактивен"),
-            (replacement.workload_row_code is None or replacement.workload_row_code in workload_codes, "unknown_replacement_workload", "Строка нагрузки замены не найдена"),
-            (replacement.academic_year in academic_years and academic_years[replacement.academic_year].active, "inactive_replacement_academic_year", "Учебный год замены отсутствует или неактивен"),
+            (
+                original is not None and original.active,
+                "inactive_replacement_original_teacher",
+                "Основной преподаватель замены отсутствует или неактивен",
+            ),
+            (
+                substitute is not None and substitute.active,
+                "inactive_replacement_substitute_teacher",
+                "Замещающий преподаватель отсутствует или неактивен",
+            ),
+            (
+                replacement.workload_row_code is None or workload is not None,
+                "unknown_replacement_workload",
+                "Строка нагрузки замены не найдена",
+            ),
+            (
+                academic_year is not None and academic_year.active,
+                "inactive_replacement_academic_year",
+                "Учебный год замены отсутствует или неактивен",
+            ),
+            (
+                workload is None
+                or workload.teacher_code == replacement.original_teacher_code,
+                "replacement_workload_teacher_mismatch",
+                "Строка нагрузки относится к другому преподавателю",
+            ),
+            (
+                workload is None
+                or workload.academic_year == replacement.academic_year,
+                "replacement_workload_academic_year_mismatch",
+                "Строка нагрузки относится к другому учебному году",
+            ),
+            (
+                academic_year is None
+                or (
+                    academic_year.starts_on <= replacement.starts_on
+                    and replacement.ends_on <= academic_year.ends_on
+                ),
+                "replacement_dates_outside_academic_year",
+                "Даты замены выходят за границы учебного года",
+            ),
         )
         for passed, code, message in checks:
             if not passed:

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rasp.application.imports import (
+    validate_activation_invariants,
     validate_and_activate_workbook,
     validate_curriculum_readiness,
 )
@@ -99,6 +100,8 @@ def _counts(batch: ImportBatch | None) -> dict[str, int]:
         "rooms": len(batch.rooms) if batch else 0,
         "academicYears": len(batch.academic_years) if batch else 0,
         "academicCycles": len(batch.academic_cycles) if batch else 0,
+        "cycleCommissions": len(batch.cycle_commissions) if batch else 0,
+        "teacherReplacements": len(batch.teacher_replacements) if batch else 0,
         "calendarPeriods": len(batch.calendar_periods) if batch else 0,
         "bellSlots": len(batch.bell_slots) if batch else 0,
         "calendarExceptions": len(batch.calendar_exceptions) if batch else 0,
@@ -347,6 +350,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         async with _staged_upload(file) as staged_path:
             try:
                 batch = read_import_workbook(staged_path)
+                validate_activation_invariants(batch)
                 validate_curriculum_readiness(batch)
             except ImportValidationError as error:
                 return JSONResponse(status_code=422, content=_issues_payload(error))
@@ -445,6 +449,26 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                         }
                         for item in batch.rooms[:5]
                     ],
+                    "cycleCommissions": [
+                        {
+                            "commissionCode": item.commission_code,
+                            "commissionName": item.commission_name,
+                            "department": item.department,
+                            "active": item.active,
+                        }
+                        for item in batch.cycle_commissions[:5]
+                    ],
+                    "teacherReplacements": [
+                        {
+                            "replacementCode": item.replacement_code,
+                            "originalTeacherCode": item.original_teacher_code,
+                            "substituteTeacherCode": item.substitute_teacher_code,
+                            "startsOn": item.starts_on.isoformat(),
+                            "endsOn": item.ends_on.isoformat(),
+                            "workloadRowCode": item.workload_row_code,
+                        }
+                        for item in batch.teacher_replacements[:5]
+                    ],
                 },
             }
         )
@@ -479,6 +503,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "rooms": receipt.room_count,
                     "academicYears": receipt.academic_year_count,
                     "academicCycles": receipt.academic_cycle_count,
+                    "cycleCommissions": receipt.cycle_commission_count,
+                    "teacherReplacements": receipt.teacher_replacement_count,
                     "calendarPeriods": receipt.calendar_period_count,
                     "bellSlots": receipt.bell_slot_count,
                     "calendarExceptions": receipt.calendar_exception_count,
@@ -521,6 +547,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "rooms": receipt.room_count,
                     "academicYears": receipt.academic_year_count,
                     "academicCycles": receipt.academic_cycle_count,
+                    "cycleCommissions": receipt.cycle_commission_count,
+                    "teacherReplacements": receipt.teacher_replacement_count,
                     "calendarPeriods": receipt.calendar_period_count,
                     "bellSlots": receipt.bell_slot_count,
                     "calendarExceptions": receipt.calendar_exception_count,

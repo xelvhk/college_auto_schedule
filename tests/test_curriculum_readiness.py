@@ -7,6 +7,8 @@ from rasp.application.readiness import (
     analyze_room_supply,
     analyze_schedule_readiness,
 )
+from rasp.application.imports import validate_activation_invariants
+from rasp.imports.excel import ImportValidationError
 from rasp.domain.models import (
     AcademicCycle,
     AcademicYear,
@@ -298,6 +300,71 @@ class CurriculumReadinessTests(unittest.TestCase):
 
 
 class ScheduleReadinessTests(unittest.TestCase):
+    def test_activation_rejects_replacement_for_another_workload_teacher(self) -> None:
+        batch = make_ready_batch()
+        substitute = Teacher(
+            teacher_code="T-002",
+            full_name="Петров Пётр Петрович",
+            yearly_assigned_hours=0,
+        )
+        replacement = TeacherReplacement(
+            replacement_code="REP-001",
+            academic_year="2026/2027",
+            original_teacher_code="T-002",
+            substitute_teacher_code="T-001",
+            starts_on="2026-09-01",
+            ends_on="2026-09-30",
+            workload_row_code="W-001",
+        )
+
+        invalid_batch = batch.model_copy(update={
+                "teachers": (*batch.teachers, substitute),
+                "teacher_replacements": (replacement,),
+            })
+        with self.assertRaises(ImportValidationError) as raised:
+            validate_activation_invariants(invalid_batch)
+
+        self.assertIn(
+            "replacement_workload_teacher_mismatch",
+            {issue.code for issue in raised.exception.issues},
+        )
+        self.assertIn(
+            "replacement_workload_teacher_mismatch",
+            {issue.code for issue in analyze_schedule_readiness(invalid_batch).issues},
+        )
+
+    def test_activation_rejects_replacement_dates_outside_academic_year(self) -> None:
+        batch = make_ready_batch()
+        substitute = Teacher(
+            teacher_code="T-002",
+            full_name="Петров Пётр Петрович",
+            yearly_assigned_hours=0,
+        )
+        replacement = TeacherReplacement(
+            replacement_code="REP-001",
+            academic_year="2026/2027",
+            original_teacher_code="T-001",
+            substitute_teacher_code="T-002",
+            starts_on="2026-08-01",
+            ends_on="2026-09-30",
+        )
+
+        invalid_batch = batch.model_copy(update={
+                "teachers": (*batch.teachers, substitute),
+                "teacher_replacements": (replacement,),
+            })
+        with self.assertRaises(ImportValidationError) as raised:
+            validate_activation_invariants(invalid_batch)
+
+        self.assertIn(
+            "replacement_dates_outside_academic_year",
+            {issue.code for issue in raised.exception.issues},
+        )
+        self.assertIn(
+            "replacement_dates_outside_academic_year",
+            {issue.code for issue in analyze_schedule_readiness(invalid_batch).issues},
+        )
+
     def test_inactive_cycle_blocks_cyclic_workload(self) -> None:
         batch = make_ready_batch()
         workload = batch.workloads[0].model_copy(

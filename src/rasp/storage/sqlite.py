@@ -404,6 +404,8 @@ class ImportReceipt:
     calendar_exception_count: int
     resource_unavailability_count: int
     academic_cycle_count: int
+    cycle_commission_count: int
+    teacher_replacement_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,6 +546,8 @@ class SqliteImportRepository:
                         batch.resource_unavailability
                     )
                     academic_cycle_count = len(batch.academic_cycles)
+                    cycle_commission_count = len(batch.cycle_commissions)
+                    teacher_replacement_count = len(batch.teacher_replacements)
 
                 if existing is not None:
                     (
@@ -564,6 +568,8 @@ class SqliteImportRepository:
                         calendar_exception_count,
                         resource_unavailability_count,
                         academic_cycle_count,
+                        cycle_commission_count,
+                        teacher_replacement_count,
                     ) = counts
 
                 connection.execute(
@@ -598,6 +604,8 @@ class SqliteImportRepository:
             calendar_exception_count=calendar_exception_count,
             resource_unavailability_count=resource_unavailability_count,
             academic_cycle_count=academic_cycle_count,
+            cycle_commission_count=cycle_commission_count,
+            teacher_replacement_count=teacher_replacement_count,
         )
 
     @staticmethod
@@ -668,6 +676,14 @@ class SqliteImportRepository:
             "SELECT COUNT(*) FROM academic_cycles WHERE import_version_id = ?",
             (version_id,),
         ).fetchone()[0]
+        cycle_commissions = connection.execute(
+            "SELECT COUNT(*) FROM cycle_commissions WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
+        teacher_replacements = connection.execute(
+            "SELECT COUNT(*) FROM teacher_replacements WHERE import_version_id = ?",
+            (version_id,),
+        ).fetchone()[0]
         return (
             int(teachers),
             int(groups),
@@ -686,6 +702,8 @@ class SqliteImportRepository:
             int(calendar_exceptions),
             int(resource_unavailability),
             int(academic_cycles),
+            int(cycle_commissions),
+            int(teacher_replacements),
         )
 
     def _insert_batch(

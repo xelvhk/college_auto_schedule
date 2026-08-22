@@ -27,6 +27,8 @@ const elements = {
   roomCount: document.querySelector("#room-count"),
   academicYearCount: document.querySelector("#academic-year-count"),
   academicCycleCount: document.querySelector("#academic-cycle-count"),
+  cycleCommissionCount: document.querySelector("#cycle-commission-count"),
+  teacherReplacementCount: document.querySelector("#teacher-replacement-count"),
   calendarPeriodCount: document.querySelector("#calendar-period-count"),
   bellSlotCount: document.querySelector("#bell-slot-count"),
   calendarExceptionCount: document.querySelector("#calendar-exception-count"),
@@ -312,6 +314,8 @@ async function previewFile() {
     elements.roomCount.textContent = payload.counts.rooms;
     elements.academicYearCount.textContent = payload.counts.academicYears;
     elements.academicCycleCount.textContent = payload.counts.academicCycles;
+    elements.cycleCommissionCount.textContent = payload.counts.cycleCommissions;
+    elements.teacherReplacementCount.textContent = payload.counts.teacherReplacements;
     elements.calendarPeriodCount.textContent = payload.counts.calendarPeriods;
     elements.bellSlotCount.textContent = payload.counts.bellSlots;
     elements.calendarExceptionCount.textContent = payload.counts.calendarExceptions;
@@ -392,7 +396,7 @@ function renderStatus(payload) {
     const value = document.createElement("strong");
     value.textContent = `№${payload.activeVersionId}`;
     const counts = document.createElement("small");
-    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.students} студентов · ${payload.counts.rooms} аудиторий`;
+    counts.textContent = `${payload.counts.teachers} преподавателей · ${payload.counts.groups} групп · ${payload.counts.students} студентов · ${payload.counts.rooms} аудиторий · ${payload.counts.cycleCommissions} комиссий · ${payload.counts.teacherReplacements} замен`;
     elements.activeSummary.append(label, value, counts);
   }
 

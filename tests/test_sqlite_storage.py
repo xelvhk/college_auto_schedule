@@ -264,7 +264,7 @@ class SqliteImportRepositoryTests(unittest.TestCase):
             }
         )
 
-        self.repository.activate_import(
+        receipt = self.repository.activate_import(
             batch, source_name="commissions.xlsx", source_sha256="b" * 64
         )
 
@@ -274,6 +274,8 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(restored.cycle_commissions, batch.cycle_commissions)
         self.assertEqual(restored.teacher_replacements, batch.teacher_replacements)
         self.assertEqual(restored.teachers[0].cycle_commission_code, "CC-IT")
+        self.assertEqual(receipt.cycle_commission_count, 1)
+        self.assertEqual(receipt.teacher_replacement_count, 1)
 
     def test_atomically_activates_and_restores_all_sections(self) -> None:
         receipt = self.repository.activate_import(
@@ -298,6 +300,8 @@ class SqliteImportRepositoryTests(unittest.TestCase):
         self.assertEqual(receipt.calendar_exception_count, 1)
         self.assertEqual(receipt.resource_unavailability_count, 1)
         self.assertEqual(receipt.academic_cycle_count, 1)
+        self.assertEqual(receipt.cycle_commission_count, 0)
+        self.assertEqual(receipt.teacher_replacement_count, 0)
         self.assertEqual(restored, make_full_batch())
 
     def test_preserves_group_curriculum_code(self) -> None:
