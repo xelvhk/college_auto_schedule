@@ -64,9 +64,14 @@ jobs:
       - name: Generate SHA-256 checksums
         shell: pwsh
         run: |
-          Get-FileHash dist/installer/*.exe -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
-            Set-Content dist/installer/SHA256SUMS.txt
+          $checksumLines = Get-FileHash dist/installer/*.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" }
+          $checksumText = ($checksumLines -join "`n") + "`n"
+          [IO.File]::WriteAllText(
+            "dist/installer/SHA256SUMS.txt",
+            $checksumText,
+            [Text.UTF8Encoding]::new($false)
+          )
 
       - name: Upload functional alpha installer
         uses: actions/upload-artifact@v4
